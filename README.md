@@ -34,8 +34,7 @@ If you have further questions, please take a look at [our FAQ](docs/FAQ.md) or j
 - **[#dendrite-dev:matrix.org](https://matrix.to/#/#dendrite-dev:matrix.org)** - The place for developers, where all Dendrite development discussion happens
 - **[#dendrite-alerts:matrix.org](https://matrix.to/#/#dendrite-alerts:matrix.org)** - Release notifications and important info, highly recommended for all Dendrite server admins
 
-Dendrite does not currently support the following MSCs, which impacts the ability to use Element X with Dendrite servers:
- - [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861): Next-gen auth OIDC
+Upstream Dendrite does not support [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) (next-gen auth with OIDC), which Element X needs to sign in. This fork has experimental support: see `docs/administration/7_delegated_auth.md`.
 
 ## Trying out this fork
 
@@ -50,8 +49,9 @@ advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
   against a running server. Expect rough edges and please report what you find.
 - Supported: room lists with ranges and filters, room subscriptions, `required_state`, incremental updates with long polling,
   invites, knocks, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions.
-- Not supported: presence (`set_presence` is ignored), and sign-in with OIDC ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)),
-  which upstream Dendrite does not have either. Whether Element X can sign in to a Dendrite server was not verified.
+- Not supported: presence (`set_presence` is ignored).
+- Sign-in with OIDC ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)) is experimental, see `docs/administration/7_delegated_auth.md`.
+  Whether Element X can sign in to a Dendrite server through Matrix Authentication Service was not verified end to end.
 
 To try it:
 

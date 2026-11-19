@@ -28,6 +28,30 @@ endpoint ([RFC 7662](https://datatracker.ietf.org/doc/html/rfc7662)), so the pro
 The endpoint is read from the provider's metadata (`/.well-known/openid-configuration` or
 `/.well-known/oauth-authorization-server`) unless `introspection_endpoint` is set.
 
+## Matrix Authentication Service
+
+For [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service) (MAS) set a `shared_secret` instead of a client ID and secret.
+The same value goes into the `matrix.secret` option of MAS, and Dendrite is then reached through the `synapse` homeserver kind.
+
+```yaml
+client_api:
+  msc3861:
+    enabled: true
+    issuer: https://auth.example.com/
+    shared_secret: "..."
+```
+
+In this mode MAS manages the accounts and devices of the server:
+
+- Dendrite introspects tokens with the shared secret as bearer token and reads the explicit `device_id` that MAS sends for compatibility sessions.
+- Nothing is created on first use. A token whose user or device MAS has not provisioned is refused, and deleting a device (logout) ends the session at once.
+- A session with the `urn:synapse:admin:*` scope is an admin, so the admin API works with MAS-issued tokens.
+- The endpoints MAS uses to manage the server are served under `/_synapse/mas/`, and only for requests that present the shared secret:
+  `query_user`, `provision_user`, `is_localpart_available`, `delete_user`, `reactivate_user`, `set_displayname`, `unset_displayname`,
+  `upsert_device`, `delete_device`, `update_device_display_name`, `sync_devices` and `allow_cross_signing_reset`.
+- `delete_user` deactivates the account but cannot erase its data, and `locked` is ignored because Dendrite has no locked accounts.
+- `allow_cross_signing_reset` lets the user replace their cross-signing keys without a password for 10 minutes. The approval is kept in memory and is lost on restart.
+
 ## What Dendrite does
 
 - Every access token is introspected. Active tokens are cached for up to a minute (less if the token expires sooner),
@@ -48,14 +72,13 @@ The endpoint is read from the provider's metadata (`/.well-known/openid-configur
   `/account/deactivate`, the 3pid write endpoints, `/delete_devices`, `DELETE /devices/{deviceId}` and the
   user-interactive auth fallback pages. `/capabilities` reports `m.change_password` and `m.3pid_changes` as disabled.
 - `registration_shared_secret` is ignored while this is enabled, so `/_synapse/admin/v1/register` is not served.
-- Replacing existing cross-signing keys needs re-authentication and is refused with `403 M_FORBIDDEN`.
+- Replacing existing cross-signing keys needs approval by the provider and is refused with `403 M_FORBIDDEN` otherwise (see above for MAS).
   The first upload still works without it.
 
 ## Limitations
 
 - Dendrite does not implement the provider side (authorization, registration, token and revocation endpoints).
   Run a provider such as [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service) or any other OIDC provider.
-- Matrix Authentication Service also provisions users and devices through Synapse specific endpoints
-  (`/_synapse/mas/...`), which Dendrite does not offer. A provider that only needs introspection works.
+- With another provider that provisions nothing, use the client ID and secret mode: accounts and devices are then created on first use.
 - Switching an existing server over does not migrate the old access tokens: they stop working, and users log in again through the provider.
 - [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) (appservice device management) is not implemented.

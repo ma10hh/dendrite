@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Features
+ - Add a Matrix Authentication Service mode to the experimental delegated authentication (`client_api.msc3861.shared_secret`): tokens are introspected with the shared secret, MAS provisions users and devices through the `/_synapse/mas/` endpoints (`query_user`, `provision_user`, `upsert_device`, `sync_devices`, `allow_cross_signing_reset` and the others), and sessions with the `urn:synapse:admin:*` scope are admins. See `docs/administration/7_delegated_auth.md`.
  - Add experimental support for delegating authentication to an external OAuth 2.0 / OpenID Connect provider, as proposed by [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861). Dendrite acts as the resource server: it validates access tokens by introspection, provisions accounts and devices from the token scopes, serves `/_matrix/client/v1/auth_metadata`, and disables the legacy login, registration, password and device-deletion endpoints. Enable it with `client_api.msc3861`. See `docs/administration/7_delegated_auth.md`.
  - Add experimental support for [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) (Simplified Sliding Sync) at `/_matrix/client/unstable/org.matrix.simplified_msc3575/sync`, the API Element X uses for fast login and sync. Supports lists, room subscriptions, `required_state`, lazy-loaded members, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions. Presence is not supported. The server advertises `org.matrix.simplified_msc3575` in `/versions`. See `docs/other/sliding-sync.md`.
 

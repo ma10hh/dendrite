@@ -175,6 +175,8 @@ client_api:
   #   client_id: dendrite
   #   client_secret: ""
   #   client_auth_method: client_secret_basic  # or client_secret_post
+  #   # Matrix Authentication Service: use this instead of client_id and client_secret.
+  #   # shared_secret: ""
   #   # Overrides the introspection endpoint advertised by the provider:
   #   # introspection_endpoint: https://auth.example.com/oauth2/introspect
 
