@@ -92,8 +92,8 @@ with the database on the same machine. Your hardware will differ, the point is t
 | Follow-up request, one new message | 44 ms | 84 ms |
 
 The cost of starting a session grows with the number of rooms in the window, so clients should page through the list rather than ask for everything at once.
-A follow-up request costs time proportional to the length of the account's history, because the order of the rooms is worked out from the latest event of each:
-about 0.2 s per request for 200,000 events on SQLite. A very old account with millions of events will notice it.
+The order of the rooms is worked out from the latest event of each room with one index lookup per room, so the cost of a follow-up request depends on the number of rooms and on how many non-message events follow each room's latest message, not on the length of the whole history
+(2000 rooms take about 5 ms on a database with 200,000 events in SQLite). Before 2026-11-19 SQLite read every event of every room for this, about 0.2 s for 200,000 events.
 
 Until 2026-11-19 SQLite was slower than this by a factor of 10 to 15 in sliding sync and in `/sync`, for rooms without recent events: its planner chose the wrong index
 (see `syncapi/storage/sqlite3/output_room_events_table.go`).

@@ -34,7 +34,7 @@ func TestRecentEventsQueriesUseTheRoomIndex(t *testing.T) {
 
 	for name, query := range map[string]string{
 		"timeline":      strings.ReplaceAll(selectRecentEventsForSyncSQL, "$", "?") + " ORDER BY id DESC LIMIT 21",
-		"room activity": "SELECT room_id, MAX(id) FROM syncapi_output_room_events WHERE room_id IN (?, ?) AND +exclude_from_sync = FALSE GROUP BY room_id",
+		"room activity": "WITH r(room_id) AS (VALUES (?), (?)) SELECT r.room_id, (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE ORDER BY e.id DESC LIMIT 1) FROM r",
 	} {
 		args := []any{"!room1:test", 0, 1 << 40}
 		if name == "room activity" {

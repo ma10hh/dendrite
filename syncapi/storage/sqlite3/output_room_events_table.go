@@ -689,16 +689,24 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 	for start := 0; start < len(roomIDs); start += sqliteMaxVariables {
 		chunk := roomIDs[start:min(start+sqliteMaxVariables, len(roomIDs))]
 		params := make([]interface{}, 0, len(bumpTypes)+len(chunk))
-		for _, evType := range bumpTypes {
-			params = append(params, evType)
-		}
 		for _, roomID := range chunk {
 			params = append(params, roomID)
 		}
-		query := "SELECT room_id, MAX(id), MAX(CASE WHEN type IN " + sqlutil.QueryVariadic(len(bumpTypes)) + " THEN id END)" +
-			" FROM syncapi_output_room_events" +
-			" WHERE room_id IN " + sqlutil.QueryVariadicOffset(len(chunk), len(bumpTypes)) +
-			" AND +exclude_from_sync = FALSE GROUP BY room_id"
+		for _, evType := range bumpTypes {
+			params = append(params, evType)
+		}
+		values := make([]string, len(chunk))
+		for i := range chunk {
+			values[i] = fmt.Sprintf("($%d)", i+1)
+		}
+		// One index probe per room, newest first, like the Postgres query: a room costs about as much as its latest
+		// event is deep, not as much as its whole history. The unary plus keeps the planner off the exclude_from_sync index.
+		query := "WITH r(room_id) AS (VALUES " + strings.Join(values, ",") + ")" +
+			" SELECT r.room_id," +
+			" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE ORDER BY e.id DESC LIMIT 1)," +
+			" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE AND e.type IN " +
+			sqlutil.QueryVariadicOffset(len(bumpTypes), len(chunk)) + " ORDER BY e.id DESC LIMIT 1)" +
+			" FROM r"
 
 		var rows *sql.Rows
 		var err error
