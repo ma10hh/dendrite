@@ -75,6 +75,10 @@ Things to know:
 - **Reverse proxies** need a read timeout of more than three minutes, because requests that wait for changes are held open that long.
   nginx's default of 60 seconds is too short. The [sample nginx configuration](docs/nginx/dendrite-sample.conf) already sets
   `proxy_read_timeout` to 600 seconds.
+- **Container images.** Release builds are published to the GitHub Container Registry as
+  `ghcr.io/ma10hh/dendrite-monolith:<tag>`, where the tag is the upstream version followed by `-f` and a build number, for example
+  `v0.15.2-f1`. Only `linux/amd64` is built, and there is no `latest` tag. Configuration and volumes work as described in
+  [build/docker](build/docker).
 - **No database changes.** This fork adds no tables or migrations, and keeps sliding sync sessions in memory, so you can switch between it and
   upstream Dendrite without migrating. After a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle.
 - **Report problems on [this fork's issue tracker](https://github.com/ma10hh/dendrite/issues), not upstream's**, since upstream does not maintain this code. Include the Dendrite
