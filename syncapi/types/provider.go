@@ -20,6 +20,8 @@ type SyncRequest struct {
 	Since         StreamingToken
 	Timeout       time.Duration
 	WantFullState bool
+	// StateMode is where the response puts room state: `state`, or `state_after` when the client asked for it (MSC4222).
+	StateMode StateMode
 
 	// Updated by the PDU stream.
 	Rooms map[string]string

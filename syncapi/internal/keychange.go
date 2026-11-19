@@ -266,7 +266,7 @@ func joinedRooms(res *types.Response, userID string) []string {
 	for roomID, join := range res.Rooms.Join {
 		// we would expect to see our join event somewhere if we newly joined the room.
 		// Normal events get put in the join section so it's not enough to know the room ID is present in 'join'.
-		newlyJoined := membershipEventPresent(join.State.Events, userID)
+		newlyJoined := membershipEventPresent(join.StateEvents(), userID)
 		if newlyJoined {
 			roomIDs = append(roomIDs, roomID)
 			continue

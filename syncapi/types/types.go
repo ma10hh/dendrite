@@ -453,6 +453,11 @@ type ClientEvents struct {
 	Events []synctypes.ClientEvent `json:"events,omitempty"`
 }
 
+// StateAfter is the `state_after` of a room. Unlike `state` it is present with an empty list of events when nothing changed (MSC4222).
+type StateAfter struct {
+	Events []synctypes.ClientEvent `json:"events"`
+}
+
 type Timeline struct {
 	Events    []synctypes.ClientEvent `json:"events"`
 	Limited   bool                    `json:"limited"`
@@ -465,14 +470,63 @@ type Summary struct {
 	InvitedMemberCount *int     `json:"m.invited_member_count,omitempty"`
 }
 
+// StateMode says where a /sync response puts the state of a room (MSC4222).
+type StateMode int
+
+const (
+	// StateBeforeTimeline puts the state changes up to the start of the timeline under `state`.
+	StateBeforeTimeline StateMode = iota
+	// StateAfterTimeline puts the state changes up to the end of the timeline under `state_after`.
+	StateAfterTimeline
+	// StateAfterTimelineUnstable is StateAfterTimeline under the unstable name `org.matrix.msc4222.state_after`.
+	StateAfterTimelineUnstable
+)
+
+// setState stores room state in the field the mode asks for. The `state_after` field is present even when it is empty.
+func setState(mode StateMode, events []synctypes.ClientEvent, state **ClientEvents, after, afterUnstable **StateAfter) {
+	if events == nil {
+		events = []synctypes.ClientEvent{}
+	}
+	switch mode {
+	case StateAfterTimeline:
+		*after = &StateAfter{Events: events}
+	case StateAfterTimelineUnstable:
+		*afterUnstable = &StateAfter{Events: events}
+	default:
+		(*state).Events = events
+	}
+}
+
 // JoinResponse represents a /sync response for a room which is under the 'join' or 'peek' key.
 type JoinResponse struct {
 	Summary              *Summary      `json:"summary,omitempty"`
 	State                *ClientEvents `json:"state,omitempty"`
+	StateAfter           *StateAfter   `json:"state_after,omitempty"`
+	StateAfterUnstable   *StateAfter   `json:"org.matrix.msc4222.state_after,omitempty"`
 	Timeline             *Timeline     `json:"timeline,omitempty"`
 	Ephemeral            *ClientEvents `json:"ephemeral,omitempty"`
 	AccountData          *ClientEvents `json:"account_data,omitempty"`
 	*UnreadNotifications `json:"unread_notifications,omitempty"`
+}
+
+// SetState stores the room state the response carries.
+func (jr *JoinResponse) SetState(mode StateMode, events []synctypes.ClientEvent) {
+	setState(mode, events, &jr.State, &jr.StateAfter, &jr.StateAfterUnstable)
+}
+
+// StateEvents returns the room state of the response, wherever it was put.
+func (jr *JoinResponse) StateEvents() []synctypes.ClientEvent {
+	var events []synctypes.ClientEvent
+	if jr.State != nil {
+		events = append(events, jr.State.Events...)
+	}
+	if jr.StateAfter != nil {
+		events = append(events, jr.StateAfter.Events...)
+	}
+	if jr.StateAfterUnstable != nil {
+		events = append(events, jr.StateAfterUnstable.Events...)
+	}
+	return events
 }
 
 func (jr JoinResponse) MarshalJSON() ([]byte, error) {
@@ -583,8 +637,15 @@ func NewInviteResponse(ctx context.Context, rsAPI api.QuerySenderIDAPI, event *t
 
 // LeaveResponse represents a /sync response for a room which is under the 'leave' key.
 type LeaveResponse struct {
-	State    *ClientEvents `json:"state,omitempty"`
-	Timeline *Timeline     `json:"timeline,omitempty"`
+	State              *ClientEvents `json:"state,omitempty"`
+	StateAfter         *StateAfter   `json:"state_after,omitempty"`
+	StateAfterUnstable *StateAfter   `json:"org.matrix.msc4222.state_after,omitempty"`
+	Timeline           *Timeline     `json:"timeline,omitempty"`
+}
+
+// SetState stores the room state the response carries.
+func (lr *LeaveResponse) SetState(mode StateMode, events []synctypes.ClientEvent) {
+	setState(mode, events, &lr.State, &lr.StateAfter, &lr.StateAfterUnstable)
 }
 
 func (lr LeaveResponse) MarshalJSON() ([]byte, error) {

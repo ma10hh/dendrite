@@ -32,6 +32,13 @@ func newSyncRequest(req *http.Request, device userapi.Device, syncDB storage.Dat
 	timeout := getTimeout(req.URL.Query().Get("timeout"))
 	fullState := req.URL.Query().Get("full_state")
 	wantFullState := fullState != "" && fullState != "false"
+	stateMode := types.StateBeforeTimeline
+	switch {
+	case req.URL.Query().Get("use_state_after") == "true":
+		stateMode = types.StateAfterTimeline
+	case req.URL.Query().Get("org.matrix.msc4222.use_state_after") == "true":
+		stateMode = types.StateAfterTimelineUnstable
+	}
 	since, sinceStr := types.StreamingToken{}, req.URL.Query().Get("since")
 	if sinceStr != "" {
 		var err error
@@ -92,6 +99,7 @@ func newSyncRequest(req *http.Request, device userapi.Device, syncDB storage.Dat
 		Timeout:           timeout,                   //
 		Rooms:             make(map[string]string),   // Populated by the PDU stream
 		WantFullState:     wantFullState,             //
+		StateMode:         stateMode,                 //
 		MembershipChanges: make(map[string]struct{}), // Populated by the PDU stream
 	}, nil
 }

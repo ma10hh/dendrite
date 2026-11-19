@@ -12,6 +12,7 @@ func TestUnstableFeatures(t *testing.T) {
 	for _, want := range []string{
 		"org.matrix.e2e_cross_signing", "org.matrix.msc2285.stable", "org.matrix.msc3916.stable",
 		"org.matrix.simplified_msc3575", // Element X will not use sliding sync without this
+		"org.matrix.msc4222",            // /sync supports state_after
 	} {
 		if !features[want] {
 			t.Errorf("%s must always be advertised", want)

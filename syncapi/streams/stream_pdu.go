@@ -107,7 +107,7 @@ func (p *PDUStreamProvider) CompleteSync(
 		// get the join response for each room
 		jr, jerr := p.getJoinResponseForCompleteSync(
 			ctx, snapshot, roomID, &stateFilter, req.WantFullState, req.Device, false,
-			events.Events, events.Limited, eventFormat,
+			req.StateMode, events.Events, events.Limited, eventFormat,
 		)
 		if jerr != nil {
 			req.Log.WithError(jerr).Error("p.getJoinResponseForCompleteSync failed")
@@ -144,7 +144,7 @@ func (p *PDUStreamProvider) CompleteSync(
 			events := recentEvents[roomID]
 			jr, err = p.getJoinResponseForCompleteSync(
 				ctx, snapshot, roomID, &stateFilter, req.WantFullState, req.Device, true,
-				events.Events, events.Limited, eventFormat,
+				req.StateMode, events.Events, events.Limited, eventFormat,
 			)
 			if err != nil {
 				req.Log.WithError(err).Error("p.getJoinResponseForCompleteSync failed")
@@ -402,8 +402,12 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 	// Now that we've filtered the timeline, work out which state events are still
 	// left. Anything that appears in the filtered timeline will be removed from the
 	// "state" section and kept in "timeline".
+	stateToSend := delta.StateEvents
+	if req.StateMode == types.StateBeforeTimeline {
+		stateToSend = removeDuplicates(delta.StateEvents, events)
+	}
 	sEvents := gomatrixserverlib.HeaderedReverseTopologicalOrdering(
-		gomatrixserverlib.ToPDUs(removeDuplicates(delta.StateEvents, events)),
+		gomatrixserverlib.ToPDUs(stateToSend),
 		// sorting by auth events is not stable unless we know the create and historical PL events,
 		// which we don't for deltas like this.
 		gomatrixserverlib.TopologicalOrderByPrevEvents,
@@ -448,9 +452,9 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 		// If we are limited by the filter AND the history visibility filter
 		// didn't "remove" events, return that the response is limited.
 		jr.Timeline.Limited = (limited && len(events) == len(recentEvents)) || delta.NewlyJoined
-		jr.State.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+		jr.SetState(req.StateMode, synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
-		})
+		}))
 		req.Response.Rooms.Join[delta.RoomID] = jr
 
 	case spec.Peek:
@@ -461,9 +465,9 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 			return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 		})
 		jr.Timeline.Limited = limited
-		jr.State.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+		jr.SetState(req.StateMode, synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
-		})
+		}))
 		req.Response.Rooms.Peek[delta.RoomID] = jr
 
 	case spec.Leave:
@@ -478,9 +482,9 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 		// If we are limited by the filter AND the history visibility filter
 		// didn't "remove" events, return that the response is limited.
 		lr.Timeline.Limited = limited && len(events) == len(recentEvents)
-		lr.State.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+		lr.SetState(req.StateMode, synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(delta.StateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
-		})
+		}))
 		req.Response.Rooms.Leave[delta.RoomID] = lr
 	}
 
@@ -550,6 +554,7 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	wantFullState bool,
 	device *userapi.Device,
 	isPeek bool,
+	stateMode types.StateMode,
 	recentStreamEvents []types.StreamEvent,
 	limited bool,
 	eventFormat synctypes.ClientEventFormat,
@@ -563,7 +568,8 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	// exclude them at the next step, so that we don't get duplicate state
 	// events in both `recentStreamEvents` and `stateEvents`.
 	var excludingEventIDs []string
-	if !wantFullState {
+	// `state_after` holds the state at the end of the timeline, so it keeps the events of the timeline too.
+	if !wantFullState && stateMode == types.StateBeforeTimeline {
 		excludingEventIDs = make([]string, 0, len(recentStreamEvents))
 		for _, event := range recentStreamEvents {
 			if event.StateKey() != nil {
@@ -599,7 +605,9 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	// If we are limited by the filter AND the history visibility filter
 	// didn't "remove" events, return that the response is limited.
 	limited = limited && len(events) == len(recentEvents)
-	stateEvents = removeDuplicates(stateEvents, events)
+	if stateMode == types.StateBeforeTimeline {
+		stateEvents = removeDuplicates(stateEvents, events)
+	}
 	if stateFilter.LazyLoadMembers {
 		if err != nil {
 			return nil, err
@@ -643,9 +651,9 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	// If we are limited by the filter AND the history visibility filter
 	// didn't "remove" events, return that the response is limited.
 	jr.Timeline.Limited = limited && len(events) == len(recentEvents)
-	jr.State.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(stateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+	jr.SetState(stateMode, synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(stateEvents), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
-	})
+	}))
 	return jr, nil
 }
 
