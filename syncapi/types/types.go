@@ -64,6 +64,14 @@ type RecentEvents struct {
 	Events  []StreamEvent
 }
 
+// RoomActivity describes the latest events of a room by stream position. Zero means none.
+type RoomActivity struct {
+	// LastEvent is the position of the latest event that is visible in sync.
+	LastEvent StreamPosition
+	// LastBump is the position of the latest event of a type that should bump the room.
+	LastBump StreamPosition
+}
+
 // Range represents a range between two stream positions.
 type Range struct {
 	// From is the position the client has already received.

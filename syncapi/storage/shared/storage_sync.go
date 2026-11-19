@@ -93,6 +93,41 @@ func (d *DatabaseTransaction) RoomIDsWithMembership(ctx context.Context, userID 
 	return d.CurrentRoomState.SelectRoomIDsWithMembership(ctx, d.txn, userID, membership)
 }
 
+func (d *DatabaseTransaction) RoomIDsWithAnyMembership(ctx context.Context, userID string) (map[string]string, error) {
+	return d.CurrentRoomState.SelectRoomIDsWithAnyMembership(ctx, d.txn, userID)
+}
+
+func (d *DatabaseTransaction) RoomActivity(ctx context.Context, roomIDs []string, bumpTypes []string) (map[string]types.RoomActivity, error) {
+	return d.OutputEvents.SelectRoomActivity(ctx, d.txn, roomIDs, bumpTypes)
+}
+
+func (d *DatabaseTransaction) StateEventsForRooms(ctx context.Context, roomIDs []string, evType, stateKey string) (map[string]*rstypes.HeaderedEvent, error) {
+	return d.CurrentRoomState.SelectStateEventsForRooms(ctx, d.txn, roomIDs, evType, stateKey)
+}
+
+func (d *DatabaseTransaction) StateEventsWithKeys(ctx context.Context, roomID, evType string, stateKeys []string) ([]*rstypes.HeaderedEvent, error) {
+	return d.CurrentRoomState.SelectStateEventsWithKeys(ctx, d.txn, roomID, evType, stateKeys)
+}
+
+func (d *DatabaseTransaction) RoomMemberCounts(ctx context.Context, roomID string) (joined, invited int, err error) {
+	if joined, err = d.CurrentRoomState.SelectMembershipCount(ctx, d.txn, roomID, spec.Join); err != nil {
+		return 0, 0, err
+	}
+	if invited, err = d.CurrentRoomState.SelectMembershipCount(ctx, d.txn, roomID, spec.Invite); err != nil {
+		return 0, 0, err
+	}
+	return joined, invited, nil
+}
+
+func (d *DatabaseTransaction) RoomHeroes(ctx context.Context, roomID, userID string) ([]string, error) {
+	heroes, err := d.CurrentRoomState.SelectRoomHeroes(ctx, d.txn, roomID, userID, []string{spec.Join, spec.Invite})
+	if err != nil || len(heroes) > 0 {
+		return heroes, err
+	}
+	// "When no joined or invited members are available, this should consist of the banned and left users"
+	return d.CurrentRoomState.SelectRoomHeroes(ctx, d.txn, roomID, userID, []string{spec.Leave, spec.Ban})
+}
+
 func (d *DatabaseTransaction) MembershipCount(ctx context.Context, roomID, membership string, pos types.StreamPosition) (int, error) {
 	return d.Memberships.SelectMembershipCount(ctx, d.txn, roomID, membership, pos)
 }

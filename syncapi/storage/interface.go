@@ -39,6 +39,19 @@ type DatabaseTransaction interface {
 	GetStateDeltasForFullStateSync(ctx context.Context, device *userapi.Device, r types.Range, userID string, stateFilter *synctypes.StateFilter, rsAPI api.SyncRoomserverAPI) ([]types.StateDelta, []string, error)
 	GetStateDeltas(ctx context.Context, device *userapi.Device, r types.Range, userID string, stateFilter *synctypes.StateFilter, rsAPI api.SyncRoomserverAPI) ([]types.StateDelta, []string, error)
 	RoomIDsWithMembership(ctx context.Context, userID string, membership string) ([]string, error)
+	// RoomIDsWithAnyMembership returns a map of room ID to the current membership for every room the user has a membership in.
+	RoomIDsWithAnyMembership(ctx context.Context, userID string) (map[string]string, error)
+	// RoomActivity returns the latest event position, and the latest bumping event position, of each room.
+	RoomActivity(ctx context.Context, roomIDs []string, bumpTypes []string) (map[string]types.RoomActivity, error)
+	// StateEventsForRooms returns the current state event with the given type and state key for each room that has one.
+	StateEventsForRooms(ctx context.Context, roomIDs []string, evType, stateKey string) (map[string]*rstypes.HeaderedEvent, error)
+	// StateEventsWithKeys returns the current state events of a room with the given type and any of the state keys.
+	StateEventsWithKeys(ctx context.Context, roomID, evType string, stateKeys []string) ([]*rstypes.HeaderedEvent, error)
+	// RoomMemberCounts returns the number of joined and invited members of a room.
+	RoomMemberCounts(ctx context.Context, roomID string) (joined, invited int, err error)
+	// RoomHeroes returns up to five users to name the room after, excluding userID: joined and invited users, or
+	// left and banned ones if there are none.
+	RoomHeroes(ctx context.Context, roomID, userID string) ([]string, error)
 	MembershipCount(ctx context.Context, roomID, membership string, pos types.StreamPosition) (int, error)
 	GetRoomSummary(ctx context.Context, roomID, userID string) (summary *types.Summary, err error)
 	RecentEvents(ctx context.Context, roomIDs []string, r types.Range, eventFilter *synctypes.RoomEventFilter, chronologicalOrder bool, onlySyncEvents bool) (map[string]types.RecentEvents, error)

@@ -671,3 +671,60 @@ func (s *outputRoomEventsStatements) ReIndex(ctx context.Context, txn *sql.Tx, l
 	}
 	return result, rows.Err()
 }
+
+// sqliteMaxVariables keeps a single statement well below SQLite's bind variable limit.
+const sqliteMaxVariables = 500
+
+func (s *outputRoomEventsStatements) SelectRoomActivity(
+	ctx context.Context, txn *sql.Tx, roomIDs []string, bumpTypes []string,
+) (map[string]types.RoomActivity, error) {
+	result := make(map[string]types.RoomActivity, len(roomIDs))
+	for _, roomID := range roomIDs {
+		result[roomID] = types.RoomActivity{}
+	}
+
+	for start := 0; start < len(roomIDs); start += sqliteMaxVariables {
+		chunk := roomIDs[start:min(start+sqliteMaxVariables, len(roomIDs))]
+		params := make([]interface{}, 0, len(bumpTypes)+len(chunk))
+		for _, evType := range bumpTypes {
+			params = append(params, evType)
+		}
+		for _, roomID := range chunk {
+			params = append(params, roomID)
+		}
+		query := "SELECT room_id, MAX(id), MAX(CASE WHEN type IN " + sqlutil.QueryVariadic(len(bumpTypes)) + " THEN id END)" +
+			" FROM syncapi_output_room_events" +
+			" WHERE room_id IN " + sqlutil.QueryVariadicOffset(len(chunk), len(bumpTypes)) +
+			" AND exclude_from_sync = FALSE GROUP BY room_id"
+
+		var rows *sql.Rows
+		var err error
+		if txn != nil {
+			rows, err = txn.QueryContext(ctx, query, params...)
+		} else {
+			rows, err = s.db.QueryContext(ctx, query, params...)
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer internal.CloseAndLogIfError(ctx, rows, "SelectRoomActivity: rows.close() failed")
+			for rows.Next() {
+				var roomID string
+				var last, bump sql.NullInt64
+				if err := rows.Scan(&roomID, &last, &bump); err != nil {
+					return err
+				}
+				result[roomID] = types.RoomActivity{
+					LastEvent: types.StreamPosition(last.Int64),
+					LastBump:  types.StreamPosition(bump.Int64),
+				}
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}

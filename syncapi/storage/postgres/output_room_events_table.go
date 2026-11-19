@@ -199,6 +199,7 @@ type outputRoomEventsStatements struct {
 	selectContextAfterEventStmt    *sql.Stmt
 	purgeEventsStmt                *sql.Stmt
 	selectSearchStmt               *sql.Stmt
+	selectRoomActivityStmt         *sql.Stmt
 }
 
 func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
@@ -254,6 +255,7 @@ func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
 		{&s.selectContextAfterEventStmt, selectContextAfterEventSQL},
 		{&s.purgeEventsStmt, purgeEventsSQL},
 		{&s.selectSearchStmt, selectSearchSQL},
+		{&s.selectRoomActivityStmt, selectRoomActivitySQL},
 	}.Prepare(db)
 }
 
@@ -722,6 +724,42 @@ func (s *outputRoomEventsStatements) ReIndex(ctx context.Context, txn *sql.Tx, l
 			return nil, err
 		}
 		result[id] = ev
+	}
+	return result, rows.Err()
+}
+
+// selectRoomActivitySQL uses one index probe per room (newest first) instead of aggregating every event of a room.
+const selectRoomActivitySQL = `
+SELECT r.room_id,
+  (SELECT e.id FROM syncapi_output_room_events e
+    WHERE e.room_id = r.room_id AND e.exclude_from_sync = FALSE
+    ORDER BY e.id DESC LIMIT 1),
+  (SELECT e.id FROM syncapi_output_room_events e
+    WHERE e.room_id = r.room_id AND e.exclude_from_sync = FALSE AND e.type = ANY($2)
+    ORDER BY e.id DESC LIMIT 1)
+FROM unnest($1::text[]) AS r(room_id)
+`
+
+func (s *outputRoomEventsStatements) SelectRoomActivity(
+	ctx context.Context, txn *sql.Tx, roomIDs []string, bumpTypes []string,
+) (map[string]types.RoomActivity, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectRoomActivityStmt).QueryContext(ctx, pq.Array(roomIDs), pq.Array(bumpTypes))
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectRoomActivity: rows.close() failed")
+
+	result := make(map[string]types.RoomActivity, len(roomIDs))
+	for rows.Next() {
+		var roomID string
+		var last, bump sql.NullInt64
+		if err = rows.Scan(&roomID, &last, &bump); err != nil {
+			return nil, err
+		}
+		result[roomID] = types.RoomActivity{
+			LastEvent: types.StreamPosition(last.Int64),
+			LastBump:  types.StreamPosition(bump.Int64),
+		}
 	}
 	return result, rows.Err()
 }

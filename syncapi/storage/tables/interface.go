@@ -63,6 +63,9 @@ type Events interface {
 	// Returns up to `limit` events. Returns `limited=true` if there are more events in this range but we hit the `limit`.
 	SelectRecentEvents(ctx context.Context, txn *sql.Tx, roomIDs []string, r types.Range, eventFilter *synctypes.RoomEventFilter, chronologicalOrder bool, onlySyncEvents bool) (map[string]types.RecentEvents, error)
 	SelectEvents(ctx context.Context, txn *sql.Tx, eventIDs []string, filter *synctypes.RoomEventFilter, preserveOrder bool) ([]types.StreamEvent, error)
+	// SelectRoomActivity returns, for each room, the stream position of its latest sync-visible event and of its
+	// latest event whose type is in bumpTypes. Every requested room is present in the result.
+	SelectRoomActivity(ctx context.Context, txn *sql.Tx, roomIDs []string, bumpTypes []string) (map[string]types.RoomActivity, error)
 	UpdateEventJSON(ctx context.Context, txn *sql.Tx, event *rstypes.HeaderedEvent) error
 	// DeleteEventsForRoom removes all event information for a room. This should only be done when removing the room entirely.
 	DeleteEventsForRoom(ctx context.Context, txn *sql.Tx, roomID string) (err error)
@@ -95,6 +98,11 @@ type Topology interface {
 
 type CurrentRoomState interface {
 	SelectStateEvent(ctx context.Context, txn *sql.Tx, roomID, evType, stateKey string) (*rstypes.HeaderedEvent, error)
+	// SelectStateEventsForRooms returns the current state event with the given type and state key for each of the
+	// rooms that has one.
+	SelectStateEventsForRooms(ctx context.Context, txn *sql.Tx, roomIDs []string, evType, stateKey string) (map[string]*rstypes.HeaderedEvent, error)
+	// SelectStateEventsWithKeys returns the current state events of one room with the given type and any of the state keys.
+	SelectStateEventsWithKeys(ctx context.Context, txn *sql.Tx, roomID, evType string, stateKeys []string) ([]*rstypes.HeaderedEvent, error)
 	SelectEventsWithEventIDs(ctx context.Context, txn *sql.Tx, eventIDs []string) ([]types.StreamEvent, error)
 	UpsertRoomState(ctx context.Context, txn *sql.Tx, event *rstypes.HeaderedEvent, membership *string, addedAt types.StreamPosition) error
 	DeleteRoomStateByEventID(ctx context.Context, txn *sql.Tx, eventID string) error

@@ -126,6 +126,8 @@ type currentRoomStateStatements struct {
 	selectJoinedUsersInRoomStmt        *sql.Stmt
 	selectEventsWithEventIDsStmt       *sql.Stmt
 	selectStateEventStmt               *sql.Stmt
+	selectStateEventsForRoomsStmt      *sql.Stmt
+	selectStateEventsWithKeysStmt      *sql.Stmt
 	selectSharedUsersStmt              *sql.Stmt
 	selectMembershipCountStmt          *sql.Stmt
 	selectRoomHeroesStmt               *sql.Stmt
@@ -159,6 +161,8 @@ func NewPostgresCurrentRoomStateTable(db *sql.DB) (tables.CurrentRoomState, erro
 		{&s.selectJoinedUsersInRoomStmt, selectJoinedUsersInRoomSQL},
 		{&s.selectEventsWithEventIDsStmt, selectEventsWithEventIDsSQL},
 		{&s.selectStateEventStmt, selectStateEventSQL},
+		{&s.selectStateEventsForRoomsStmt, selectStateEventsForRoomsSQL},
+		{&s.selectStateEventsWithKeysStmt, selectStateEventsWithKeysSQL},
 		{&s.selectSharedUsersStmt, selectSharedUsersSQL},
 		{&s.selectMembershipCountStmt, selectMembershipCount},
 		{&s.selectRoomHeroesStmt, selectRoomHeroes},
@@ -474,4 +478,59 @@ func (s *currentRoomStateStatements) SelectMembershipCount(ctx context.Context, 
 		return 0, err
 	}
 	return count, nil
+}
+
+const selectStateEventsForRoomsSQL = "" +
+	"SELECT room_id, headered_event_json FROM syncapi_current_room_state WHERE room_id = ANY($1) AND type = $2 AND state_key = $3"
+
+func (s *currentRoomStateStatements) SelectStateEventsForRooms(
+	ctx context.Context, txn *sql.Tx, roomIDs []string, evType, stateKey string,
+) (map[string]*rstypes.HeaderedEvent, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectStateEventsForRoomsStmt).QueryContext(ctx, pq.Array(roomIDs), evType, stateKey)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectStateEventsForRooms: rows.close() failed")
+
+	result := make(map[string]*rstypes.HeaderedEvent, len(roomIDs))
+	for rows.Next() {
+		var roomID string
+		var eventBytes []byte
+		if err = rows.Scan(&roomID, &eventBytes); err != nil {
+			return nil, err
+		}
+		var ev rstypes.HeaderedEvent
+		if err = json.Unmarshal(eventBytes, &ev); err != nil {
+			return nil, err
+		}
+		result[roomID] = &ev
+	}
+	return result, rows.Err()
+}
+
+const selectStateEventsWithKeysSQL = "" +
+	"SELECT headered_event_json FROM syncapi_current_room_state WHERE room_id = $1 AND type = $2 AND state_key = ANY($3)"
+
+func (s *currentRoomStateStatements) SelectStateEventsWithKeys(
+	ctx context.Context, txn *sql.Tx, roomID, evType string, stateKeys []string,
+) ([]*rstypes.HeaderedEvent, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectStateEventsWithKeysStmt).QueryContext(ctx, roomID, evType, pq.Array(stateKeys))
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectStateEventsWithKeys: rows.close() failed")
+
+	var result []*rstypes.HeaderedEvent
+	for rows.Next() {
+		var eventBytes []byte
+		if err = rows.Scan(&eventBytes); err != nil {
+			return nil, err
+		}
+		var ev rstypes.HeaderedEvent
+		if err = json.Unmarshal(eventBytes, &ev); err != nil {
+			return nil, err
+		}
+		result = append(result, &ev)
+	}
+	return result, rows.Err()
 }

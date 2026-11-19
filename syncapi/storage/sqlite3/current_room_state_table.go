@@ -536,3 +536,96 @@ func (s *currentRoomStateStatements) SelectMembershipCount(ctx context.Context, 
 	}
 	return count, nil
 }
+
+func (s *currentRoomStateStatements) SelectStateEventsForRooms(
+	ctx context.Context, txn *sql.Tx, roomIDs []string, evType, stateKey string,
+) (map[string]*rstypes.HeaderedEvent, error) {
+	result := make(map[string]*rstypes.HeaderedEvent, len(roomIDs))
+	for start := 0; start < len(roomIDs); start += sqliteMaxVariables {
+		chunk := roomIDs[start:min(start+sqliteMaxVariables, len(roomIDs))]
+		params := make([]interface{}, 0, 2+len(chunk))
+		params = append(params, evType, stateKey)
+		for _, roomID := range chunk {
+			params = append(params, roomID)
+		}
+		query := "SELECT room_id, headered_event_json FROM syncapi_current_room_state" +
+			" WHERE type = $1 AND state_key = $2 AND room_id IN " + sqlutil.QueryVariadicOffset(len(chunk), 2)
+
+		var rows *sql.Rows
+		var err error
+		if txn != nil {
+			rows, err = txn.QueryContext(ctx, query, params...)
+		} else {
+			rows, err = s.db.QueryContext(ctx, query, params...)
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer internal.CloseAndLogIfError(ctx, rows, "SelectStateEventsForRooms: rows.close() failed")
+			for rows.Next() {
+				var roomID string
+				var eventBytes []byte
+				if err := rows.Scan(&roomID, &eventBytes); err != nil {
+					return err
+				}
+				var ev rstypes.HeaderedEvent
+				if err := json.Unmarshal(eventBytes, &ev); err != nil {
+					return err
+				}
+				result[roomID] = &ev
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func (s *currentRoomStateStatements) SelectStateEventsWithKeys(
+	ctx context.Context, txn *sql.Tx, roomID, evType string, stateKeys []string,
+) ([]*rstypes.HeaderedEvent, error) {
+	var result []*rstypes.HeaderedEvent
+	for start := 0; start < len(stateKeys); start += sqliteMaxVariables {
+		chunk := stateKeys[start:min(start+sqliteMaxVariables, len(stateKeys))]
+		params := make([]interface{}, 0, 2+len(chunk))
+		params = append(params, roomID, evType)
+		for _, key := range chunk {
+			params = append(params, key)
+		}
+		query := "SELECT headered_event_json FROM syncapi_current_room_state" +
+			" WHERE room_id = $1 AND type = $2 AND state_key IN " + sqlutil.QueryVariadicOffset(len(chunk), 2)
+
+		var rows *sql.Rows
+		var err error
+		if txn != nil {
+			rows, err = txn.QueryContext(ctx, query, params...)
+		} else {
+			rows, err = s.db.QueryContext(ctx, query, params...)
+		}
+		if err != nil {
+			return nil, err
+		}
+		err = func() error {
+			defer internal.CloseAndLogIfError(ctx, rows, "SelectStateEventsWithKeys: rows.close() failed")
+			for rows.Next() {
+				var eventBytes []byte
+				if err := rows.Scan(&eventBytes); err != nil {
+					return err
+				}
+				var ev rstypes.HeaderedEvent
+				if err := json.Unmarshal(eventBytes, &ev); err != nil {
+					return err
+				}
+				result = append(result, &ev)
+			}
+			return rows.Err()
+		}()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
