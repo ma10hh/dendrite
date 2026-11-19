@@ -83,14 +83,7 @@ func Setup(
 	rateLimits := httputil.NewRateLimits(&cfg.RateLimiting)
 	userInteractiveAuth := auth.NewUserInteractive(userAPI, cfg)
 
-	unstableFeatures := map[string]bool{
-		"org.matrix.e2e_cross_signing": true,
-		"org.matrix.msc2285.stable":    true,
-		"org.matrix.msc3916.stable":    true,
-	}
-	for _, msc := range cfg.MSCs.MSCs {
-		unstableFeatures["org.matrix."+msc] = true
-	}
+	unstableFeatures := unstableFeatures(cfg.MSCs.MSCs)
 
 	// singleflight protects /join endpoints from being invoked
 	// multiple times from the same user and room, otherwise
@@ -1566,4 +1559,19 @@ func Setup(
 			return DeleteEventReport(req, rsAPI, vars["reportID"])
 		}),
 	).Methods(http.MethodDelete, http.MethodOptions)
+}
+
+// unstableFeatures returns the `unstable_features` of /versions: what is always supported, plus the MSCs enabled in the config.
+func unstableFeatures(enabledMSCs []string) map[string]bool {
+	features := map[string]bool{
+		"org.matrix.e2e_cross_signing": true,
+		"org.matrix.msc2285.stable":    true,
+		"org.matrix.msc3916.stable":    true,
+		// Simplified Sliding Sync, served by the sync API. Element X looks for this flag to decide whether it can use the server.
+		"org.matrix.simplified_msc3575": true,
+	}
+	for _, msc := range enabledMSCs {
+		features["org.matrix."+msc] = true
+	}
+	return features
 }
