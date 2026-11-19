@@ -68,6 +68,9 @@ In this mode MAS manages the accounts and devices of the server:
   returns the provider's metadata. `/_matrix/client/unstable/org.matrix.msc2965/auth_metadata` and `.../auth_issuer`
   are served as well, and `/.well-known/matrix/client` gains `org.matrix.msc2965.authentication`.
   Without this feature the endpoints answer `404 M_UNRECOGNIZED`.
+- Appservices keep working ([MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190), [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326)):
+  they register users with `POST /register` (type `m.login.application_service` and `"inhibit_login": true`), create devices with `PUT /devices/{deviceId}`
+  and act as one of them with the `device_id` query parameter next to `user_id`. `POST /login` and a register that would log in answer `400 M_APPSERVICE_LOGIN_UNSUPPORTED`.
 - These endpoints answer `404 M_UNRECOGNIZED`: `/login`, `/register`, `/logout`, `/logout/all`, `/account/password`,
   `/account/deactivate`, the 3pid write endpoints, `/delete_devices`, `DELETE /devices/{deviceId}` and the
   user-interactive auth fallback pages. `/capabilities` reports `m.change_password` and `m.3pid_changes` as disabled.
@@ -82,3 +85,20 @@ In this mode MAS manages the accounts and devices of the server:
 - With another provider that provisions nothing, use the client ID and secret mode: accounts and devices are then created on first use.
 - Switching an existing server over does not migrate the old access tokens: they stop working, and users log in again through the provider.
 - [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) (appservice device management) is not implemented.
+
+## Signing in with a QR code
+
+A signed-in device can sign in a new one by scanning a QR code. The two devices exchange short messages through a rendezvous session on a homeserver
+([MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388)). The feature is off by default:
+
+```yaml
+client_api:
+  rendezvous:
+    enabled: true
+    # Let anyone create a session, also devices without an account on this server.
+    # allow_unauthenticated: false
+```
+
+Sessions are kept in memory for five minutes, hold at most 4096 bytes and are limited to 1000 at a time. Only the endpoint to create one needs an access token,
+and only if `allow_unauthenticated` is not set. The endpoints are `/_matrix/client/v1/rendezvous` and the unstable `/_matrix/client/unstable/io.element.msc4388/rendezvous`.
+The provider (MAS) has to support signing in a device with a QR code as well, through the device authorization grant.
