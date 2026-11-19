@@ -7,7 +7,7 @@
 
 ### Features
  - Bundle the aggregations of relations with events: the thread summary, the latest edit and the references, in `unsigned["m.relations"]`, in `/messages`, `/context`, `/event`, `/relations`, `/search`, in `/sync` for timelines with a gap and in sliding sync. The content of edited events is not replaced.
- - Add knocking: `POST /_matrix/client/v3/knock/{roomIdOrAlias}` for rooms this server is in, leaving a room withdraws the knock, and the federation endpoints `make_knock` and `send_knock` let users of other servers knock on rooms of this server. Knocking on rooms of other servers is not supported yet.
+ - Add knocking: `POST /_matrix/client/v3/knock/{roomIdOrAlias}`, for rooms of this server and of other servers, leaving a room withdraws the knock, and the federation endpoints `make_knock` and `send_knock` let users of other servers knock on rooms of this server.
  - Add URL previews (`GET /_matrix/client/v1/media/preview_url` and `/_matrix/media/v3/preview_url`), off by default (`media_api.url_previews`). Connections to private, loopback, link local and reserved addresses are always refused, also after redirects and for names that resolve to them. Images are only kept for common raster types.
  - `/publicRooms` filters by `room_types` and lists the `room_type` of each room, on the client and the federation API. The federation API also applies the search term now.
  - Add the room summary API ([MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266)) at `/_matrix/client/v1/room_summary/{roomIdOrAlias}`, for local and remote rooms, with the unstable `im.nheko.summary` paths.
