@@ -5,7 +5,7 @@
 Dendrite is a second-generation Matrix homeserver written in Go. It is currently in maintenance mode,
 meaning only security fixes are being applied, for example [room version 12](https://matrix.org/blog/2025/08/security-release/).
 
-> **This is a fork of [element-hq/dendrite](https://github.com/element-hq/dendrite)** that adds experimental support for
+> **This is a fork of [element-hq/dendrite](https://github.com/element-hq/dendrite)** that adds support for
 > Simplified Sliding Sync (MSC4186), which Element X needs. See [Trying out this fork](#trying-out-this-fork).
 
 It intends to provide an **efficient** and **reliable** alternative to [Synapse](https://github.com/matrix-org/synapse):
@@ -38,18 +38,16 @@ Upstream Dendrite does not support [MSC3861](https://github.com/matrix-org/matri
 
 ## Trying out this fork
 
-This fork adds **experimental support for Simplified Sliding Sync ([MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186))**,
+This fork adds **support for Simplified Sliding Sync ([MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186))**,
 the API [Element X](https://element.io/) uses for fast login and sync. Upstream Dendrite is in maintenance mode and does not
 have it, so Element X cannot sync with it. There is nothing to enable: build this fork, run it like any Dendrite, and it
 advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
 
-**Status: experimental, and not yet tried with a real Element X client.**
-
-- It is covered by unit and integration tests on both SQLite and PostgreSQL, and was exercised end to end with `curl`
-  against a running server. Expect rough edges and please report what you find.
-- Supported: room lists with ranges and filters, room subscriptions, `required_state`, incremental updates with long polling,
+**Status: in use.** It is used with Element X on a phone (release `0.15.2-f1` of this fork), is covered by unit and integration tests on both SQLite and PostgreSQL,
+  and a load test with a 2000 room account is included. Please report what you find.
+- Supported: room lists with ranges and the `is_dm`, `is_encrypted`, `is_invite`, `room_types`, `not_room_types`, `spaces`, `tags` and `not_tags` filters, room subscriptions, `required_state`, incremental updates with long polling,
   invites, knocks, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions.
-- Not supported: presence (`set_presence` is ignored).
+- `set_presence` is applied like in `/sync`. There is no presence extension, and the `/v4/sync` dialect of the final MSC text is not implemented. See `docs/other/sliding-sync.md`.
 - Sign-in with OIDC ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)) is experimental, see `docs/administration/7_delegated_auth.md`.
   Whether Element X can sign in to a Dendrite server through Matrix Authentication Service was not verified end to end.
 

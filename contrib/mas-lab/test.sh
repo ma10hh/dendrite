@@ -130,6 +130,30 @@ expect "sync shows the message" "true" "$(echo "$BODY" | jq --arg e "$EVENT" '[.
 call POST "$HS/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0" "$ALICE" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":5}}}'
 expect_code "sliding sync" 200
 expect "sliding sync lists the room" "true" "$(echo "$BODY" | jq --arg r "$ROOM" '.rooms | has($r)')"
+section "Sync features: state_after, set_presence, tag and space filters"
+call GET "$HS/_matrix/client/v3/sync?timeout=0&use_state_after=true" "$ALICE"
+expect_code "sync with use_state_after" 200
+expect "state_after has an events array" "array" "$(echo "$BODY" | jq -r --arg r "$ROOM" '.rooms.join[$r].state_after.events | type')"
+expect "state is left out when state_after is used" "null" "$(echo "$BODY" | jq -r --arg r "$ROOM" '.rooms.join[$r].state | type')"
+expect "state_after has the room state at the end of the timeline" "true" "$(echo "$BODY" | jq --arg r "$ROOM" '[.rooms.join[$r].state_after.events[].type] | index("m.room.create") != null')"
+call GET "$HS/_matrix/client/v3/sync?timeout=0&org.matrix.msc4222.use_state_after=true" "$ALICE"
+expect "unstable state_after name" "array" "$(echo "$BODY" | jq -r --arg r "$ROOM" '.rooms.join[$r]["org.matrix.msc4222.state_after"].events | type')"
+call GET $HS/_matrix/client/versions
+expect "versions advertises msc4222" "true" "$(echo "$BODY" | jq '.unstable_features["org.matrix.msc4222"]')"
+SS="$HS/_matrix/client/unstable/org.matrix.simplified_msc3575/sync"
+call POST "$SS?timeout=0&set_presence=offline" "$ALICE" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":1,"required_state":[]}}}'
+expect_code "sliding sync with set_presence=offline" 200
+call POST "$SS?timeout=0&set_presence=busy" "$ALICE" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":1,"required_state":[]}}}'
+expect_err "sliding sync refuses an unknown set_presence" 400 M_INVALID_PARAM
+call PUT "$HS/_matrix/client/v3/user/%40alice%3Alab.test/rooms/$ROOM/tags/m.favourite" "$ALICE" '{"order":0.5}'
+expect_code "tag the room as a favourite" 200
+filter_rooms() { call POST "$SS?timeout=0" "$ALICE" "{\"lists\":{\"l\":{\"ranges\":[[0,10]],\"timeline_limit\":1,\"required_state\":[],\"filters\":$1}}}"; echo "$BODY" | jq -c '[(.rooms // {}) | keys[]] | sort'; }
+expect "tags filter finds the favourite" "[\"$ROOM\"]" "$(filter_rooms '{"tags":["m.favourite"]}')"
+expect "not_tags filter hides the favourite" "[]" "$(filter_rooms '{"not_tags":["m.favourite"]}')"
+expect "an unused tag matches nothing" "[]" "$(filter_rooms '{"tags":["u.other"]}')"
+expect "a space the user is not in matches nothing" "[]" "$(filter_rooms "{\"spaces\":[\"$ROOM\"]}")"
+
+section "Media"
 CONTENT=$(curl -s -H "Authorization: Bearer $ALICE" -H 'Content-Type: text/plain' --data-binary 'media body' "$HS/_matrix/media/v3/upload?filename=a.txt")
 MXC=$(echo "$CONTENT" | jq -r .content_uri)
 if [ "$MXC" != null ] && [ -n "$MXC" ]; then
