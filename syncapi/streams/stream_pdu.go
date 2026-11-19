@@ -446,6 +446,13 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 			}
 		}
 		jr.Timeline.PrevBatch = &prevBatch
+		// The aggregations of the relations are for the timelines that start somewhere in the middle: the client
+		// has nothing to aggregate the events into.
+		if (limited && len(events) == len(recentEvents)) || delta.NewlyJoined {
+			if uid, uerr := spec.NewUserID(device.UserID, true); uerr == nil {
+				events = internal.BundleRelations(ctx, snapshot, p.rsAPI, *uid, events)
+			}
+		}
 		jr.Timeline.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(events), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 		})
@@ -645,6 +652,11 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	}
 
 	jr.Timeline.PrevBatch = prevBatch
+	if limited && len(events) == len(recentEvents) {
+		if uid, uerr := spec.NewUserID(device.UserID, true); uerr == nil {
+			events = internal.BundleRelations(ctx, snapshot, p.rsAPI, *uid, events)
+		}
+	}
 	jr.Timeline.Events = synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(events), eventFormat, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return p.rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 	})

@@ -111,6 +111,8 @@ func GetEvent(
 		}
 	}
 
+	events = internal.BundleRelations(ctx, db, rsAPI, *userID, events)
+
 	clientEvent, err := synctypes.ToClientEvent(events[0], synctypes.FormatAll, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 	})

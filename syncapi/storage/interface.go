@@ -120,6 +120,7 @@ type DatabaseTransaction interface {
 	RelationsFor(ctx context.Context, roomID, eventID, relType, eventType string, from, to types.StreamPosition, backwards bool, limit int) (events []types.StreamEvent, prevBatch, nextBatch string, err error)
 	// Threads returns the threads of a room, the ones with the latest reply first, from before the given relation ID on.
 	Threads(ctx context.Context, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error)
+	RelationBundles(ctx context.Context, roomID string, eventIDs []string, userID string, withThreadChildren bool) (*types.RelationBundles, error)
 }
 
 type Database interface {

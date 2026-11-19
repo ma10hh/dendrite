@@ -118,6 +118,8 @@ func Relations(
 		return util.ErrorResponse(err)
 	}
 
+	filteredEvents = internal.BundleRelations(req.Context(), snapshot, rsAPI, *userID, filteredEvents)
+
 	// Convert the events into client events, and optionally filter based on the event
 	// type if it was specified.
 	res.Chunk = make([]synctypes.ClientEvent, 0, len(filteredEvents))

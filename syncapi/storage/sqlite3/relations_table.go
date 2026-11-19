@@ -12,6 +12,7 @@ import (
 
 	"github.com/element-hq/dendrite/internal"
 	"github.com/element-hq/dendrite/internal/sqlutil"
+	"github.com/element-hq/dendrite/syncapi/storage/shared"
 	"github.com/element-hq/dendrite/syncapi/storage/tables"
 	"github.com/element-hq/dendrite/syncapi/types"
 )
@@ -57,6 +58,7 @@ const selectMaxRelationIDSQL = "" +
 	"SELECT COALESCE(MAX(id), 0) FROM syncapi_relations"
 
 type relationsStatements struct {
+	db                             *sql.DB
 	streamIDStatements             *StreamIDStatements
 	insertRelationStmt             *sql.Stmt
 	selectRelationsInRangeAscStmt  *sql.Stmt
@@ -69,6 +71,7 @@ type relationsStatements struct {
 
 func NewSqliteRelationsTable(db *sql.DB, streamID *StreamIDStatements) (tables.Relations, error) {
 	s := &relationsStatements{
+		db:                 db,
 		streamIDStatements: streamID,
 	}
 	_, err := db.Exec(relationsSchema)
@@ -186,6 +189,20 @@ const selectParticipatedThreadsSQL = "" +
 	" WHERE c.room_id = ?1 AND c.event_id = syncapi_relations.event_id AND c.rel_type = 'm.thread' AND ce.sender = ?2))" +
 	" ORDER BY MAX(id) DESC LIMIT ?4) t" +
 	" ORDER BY t.latest DESC"
+
+// SelectBundles implements tables.Relations
+func (s *relationsStatements) SelectBundles(
+	ctx context.Context, txn *sql.Tx, roomID string, eventIDs []string, userID string, withThreadChildren bool,
+) (*types.RelationBundles, error) {
+	in := func(column string, first int, values []string) (string, []any) {
+		args := make([]any, len(values))
+		for i, v := range values {
+			args[i] = v
+		}
+		return column + " IN " + sqlutil.QueryVariadicOffset(len(values), first-1), args
+	}
+	return shared.SelectRelationBundles(ctx, s.db, txn, in, roomID, eventIDs, userID, withThreadChildren)
+}
 
 func (s *relationsStatements) SelectThreads(
 	ctx context.Context, txn *sql.Tx, roomID, userID string, onlyParticipated bool, before int64, limit int,

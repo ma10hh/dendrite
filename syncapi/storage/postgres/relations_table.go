@@ -9,9 +9,13 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"fmt"
+
+	"github.com/lib/pq"
 
 	"github.com/element-hq/dendrite/internal"
 	"github.com/element-hq/dendrite/internal/sqlutil"
+	"github.com/element-hq/dendrite/syncapi/storage/shared"
 	"github.com/element-hq/dendrite/syncapi/storage/tables"
 	"github.com/element-hq/dendrite/syncapi/types"
 )
@@ -59,6 +63,7 @@ const selectMaxRelationIDSQL = "" +
 	"SELECT COALESCE(MAX(id), 0) FROM syncapi_relations"
 
 type relationsStatements struct {
+	db                             *sql.DB
 	insertRelationStmt             *sql.Stmt
 	selectRelationsInRangeAscStmt  *sql.Stmt
 	selectRelationsInRangeDescStmt *sql.Stmt
@@ -69,7 +74,7 @@ type relationsStatements struct {
 }
 
 func NewPostgresRelationsTable(db *sql.DB) (tables.Relations, error) {
-	s := &relationsStatements{}
+	s := &relationsStatements{db: db}
 	_, err := db.Exec(relationsSchema)
 	if err != nil {
 		return nil, err
@@ -180,6 +185,16 @@ const selectParticipatedThreadsSQL = "" +
 	" WHERE c.room_id = $1 AND c.event_id = syncapi_relations.event_id AND c.rel_type = 'm.thread' AND ce.sender = $2))" +
 	" ORDER BY MAX(id) DESC LIMIT $4) t" +
 	" ORDER BY t.latest DESC"
+
+// SelectBundles implements tables.Relations
+func (s *relationsStatements) SelectBundles(
+	ctx context.Context, txn *sql.Tx, roomID string, eventIDs []string, userID string, withThreadChildren bool,
+) (*types.RelationBundles, error) {
+	in := func(column string, first int, values []string) (string, []any) {
+		return fmt.Sprintf("%s = ANY($%d)", column, first), []any{pq.StringArray(values)}
+	}
+	return shared.SelectRelationBundles(ctx, s.db, txn, in, roomID, eventIDs, userID, withThreadChildren)
+}
 
 func (s *relationsStatements) SelectThreads(
 	ctx context.Context, txn *sql.Tx, roomID, userID string, onlyParticipated bool, before int64, limit int,

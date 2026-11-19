@@ -202,6 +202,12 @@ func Context(
 		}
 	}
 
+	eventsBeforeFiltered = internal.BundleRelations(ctx, snapshot, rsAPI, *userID, eventsBeforeFiltered)
+	eventsAfterFiltered = internal.BundleRelations(ctx, snapshot, rsAPI, *userID, eventsAfterFiltered)
+	if bundled := internal.BundleRelations(ctx, snapshot, rsAPI, *userID, []*rstypes.HeaderedEvent{&requestedEvent}); len(bundled) == 1 {
+		requestedEvent = *bundled[0]
+	}
+
 	eventsBeforeClient := synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(eventsBeforeFiltered), synctypes.FormatAll, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 	})

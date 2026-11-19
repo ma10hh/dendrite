@@ -25,6 +25,7 @@ import (
 	"github.com/element-hq/dendrite/internal/sqlutil"
 	roomserverAPI "github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/types"
+	"github.com/element-hq/dendrite/syncapi/internal"
 	"github.com/element-hq/dendrite/syncapi/storage"
 	"github.com/element-hq/dendrite/syncapi/synctypes"
 	"github.com/element-hq/dendrite/userapi/api"
@@ -164,6 +165,10 @@ func Search(req *http.Request, device *api.Device, syncDB storage.Database, fts 
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
 		}
+	}
+
+	if uid, uerr := spec.NewUserID(device.UserID, true); uerr == nil {
+		evs = internal.BundleRelations(ctx, snapshot, rsAPI, *uid, evs)
 	}
 
 	groups := make(map[string]RoomResult)

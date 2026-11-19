@@ -243,4 +243,7 @@ type Relations interface {
 	// has a relation ID below before. If onlyParticipated is set, only threads that the user sent the root or a
 	// reply of are returned.
 	SelectThreads(ctx context.Context, txn *sql.Tx, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error)
+	// SelectBundles returns what is needed to bundle the relations of the events with them, for the user. With
+	// withThreadChildren it includes the replies of each thread.
+	SelectBundles(ctx context.Context, txn *sql.Tx, roomID string, eventIDs []string, userID string, withThreadChildren bool) (*types.RelationBundles, error)
 }

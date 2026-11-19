@@ -1618,3 +1618,104 @@ func TestMessagesFilter(t *testing.T) {
 		}
 	})
 }
+
+func TestBundledRelations(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		user := test.NewUser(t)
+		other := test.NewUser(t)
+		alice := userapi.Device{ID: "ALICEID", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
+
+		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
+		routers := httputil.NewRouters()
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		defer close()
+
+		natsInstance := jetstream.NATSInstance{}
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+		rsAPI.SetFederationAPI(nil, nil)
+		AddPublicRoutes(processCtx, routers, cfg, cm, &natsInstance, &syncUserAPI{accounts: []userapi.Device{alice}}, rsAPI, caches, caching.DisableMetrics)
+
+		relatesTo := func(relType string, target *rstypes.HeaderedEvent) map[string]any {
+			return map[string]any{"rel_type": relType, "event_id": target.EventID()}
+		}
+		room := test.NewRoom(t, user)
+		room.CreateAndInsert(t, other, spec.MRoomMember, map[string]interface{}{"membership": "join"}, test.WithStateKey(other.ID))
+		original := room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "original"})
+		edit1 := room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{
+			"msgtype": "m.text", "body": "* first edit", "m.new_content": map[string]any{"msgtype": "m.text", "body": "first edit"},
+			"m.relates_to": relatesTo("m.replace", original),
+		})
+		// An edit by somebody else, an edit without the new content and a reply of an ignored user do not count.
+		room.CreateAndInsert(t, other, "m.room.message", map[string]interface{}{
+			"msgtype": "m.text", "body": "* hijack", "m.new_content": map[string]any{"msgtype": "m.text", "body": "hijack"},
+			"m.relates_to": relatesTo("m.replace", original),
+		})
+		room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "* no content", "m.relates_to": relatesTo("m.replace", original)})
+		reply := room.CreateAndInsert(t, other, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "in thread", "m.relates_to": relatesTo("m.thread", original)})
+		room.CreateAndInsert(t, other, "m.key.verification.done", map[string]interface{}{"m.relates_to": relatesTo("m.reference", original)})
+		last := room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "last"})
+		if err := api.SendEvents(context.Background(), rsAPI, api.KindNew, room.Events(), "test", "test", "test", nil, false); err != nil {
+			t.Fatalf("failed to send events: %v", err)
+		}
+		jsctx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
+		defer jetstream.DeleteAllStreams(jsctx, &cfg.Global.JetStream)
+		syncUntil(t, routers, alice.AccessToken, false, func(syncBody string) bool {
+			return gjson.Get(syncBody, fmt.Sprintf(`rooms.join.%s.timeline.events.#(event_id=="%s")`, room.ID, last.EventID())).Exists()
+		})
+
+		get := func(path string, params map[string]string) string {
+			t.Helper()
+			params["access_token"] = alice.AccessToken
+			w := httptest.NewRecorder()
+			routers.Client.ServeHTTP(w, test.NewRequest(t, "GET", path, test.WithQueryParams(params)))
+			if w.Code != 200 {
+				t.Fatalf("%s answered %d: %s", path, w.Code, w.Body.String())
+			}
+			return w.Body.String()
+		}
+		check := func(name string, ev gjson.Result) {
+			t.Helper()
+			rel := ev.Get(`unsigned.m\.relations`)
+			if got := rel.Get(`m\.replace.event_id`).String(); got != edit1.EventID() {
+				t.Errorf("%s: m.replace is %q, want the one valid edit %s", name, got, edit1.EventID())
+			}
+			if got := ev.Get("content.body").String(); got != "original" {
+				t.Errorf("%s: the content of the edited event must be left alone, got %q", name, got)
+			}
+			if got := rel.Get(`m\.thread.count`).Int(); got != 1 {
+				t.Errorf("%s: thread count %d, want 1", name, got)
+			}
+			if got := rel.Get(`m\.thread.latest_event.event_id`).String(); got != reply.EventID() {
+				t.Errorf("%s: latest reply %q, want %s", name, got, reply.EventID())
+			}
+			if got := rel.Get(`m\.thread.current_user_participated`).Bool(); !got {
+				t.Errorf("%s: alice sent the root of the thread, so she took part in it", name)
+			}
+			if got := rel.Get(`m\.reference.chunk.#`).Int(); got != 1 {
+				t.Errorf("%s: %d references, want 1", name, got)
+			}
+		}
+		find := func(body, path string) gjson.Result {
+			return gjson.Get(body, path+fmt.Sprintf(`.#(event_id=="%s")`, original.EventID()))
+		}
+
+		messages := get(fmt.Sprintf("/_matrix/client/v3/rooms/%s/messages", room.ID), map[string]string{"dir": "b", "limit": "50"})
+		check("messages", find(messages, "chunk"))
+		check("event", gjson.Parse(get(fmt.Sprintf("/_matrix/client/v3/rooms/%s/event/%s", room.ID, original.EventID()), map[string]string{})))
+		context := get(fmt.Sprintf("/_matrix/client/v3/rooms/%s/context/%s", room.ID, last.EventID()), map[string]string{"limit": "50"})
+		check("context", find(context, "events_before"))
+		check("context, the requested event", gjson.Parse(get(fmt.Sprintf("/_matrix/client/v3/rooms/%s/context/%s", room.ID, original.EventID()), map[string]string{"limit": "2"})).Get("event"))
+		full := get("/_matrix/client/v3/sync", map[string]string{"timeout": "0"})
+		check("sync (the first one is limited)", find(full, fmt.Sprintf(`rooms.join.%s.timeline.events`, room.ID)))
+
+		// Events without relations, the edits and the state events get nothing.
+		unrelated := gjson.Get(messages, fmt.Sprintf(`chunk.#(event_id=="%s")`, last.EventID()))
+		if unrelated.Get(`unsigned.m\.relations`).Exists() {
+			t.Errorf("an event without relations must have no aggregation: %s", unrelated.Raw)
+		}
+		if gjson.Get(messages, `chunk.#(type=="m.room.create")`).Get(`unsigned.m\.relations`).Exists() {
+			t.Errorf("state events get no aggregations")
+		}
+	})
+}

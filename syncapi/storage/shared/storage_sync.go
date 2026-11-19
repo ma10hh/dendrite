@@ -771,6 +771,11 @@ func isStatefilterEmpty(filter *synctypes.StateFilter) bool {
 	}
 }
 
+// RelationBundles returns what is needed to bundle the relations of the events. See tables.Relations.SelectBundles.
+func (d *DatabaseTransaction) RelationBundles(ctx context.Context, roomID string, eventIDs []string, userID string, withThreadChildren bool) (*types.RelationBundles, error) {
+	return d.Relations.SelectBundles(ctx, d.txn, roomID, eventIDs, userID, withThreadChildren)
+}
+
 // Threads returns the threads of a room, the ones with the latest reply first. See tables.Relations.SelectThreads.
 func (d *DatabaseTransaction) Threads(ctx context.Context, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error) {
 	return d.Relations.SelectThreads(ctx, d.txn, roomID, userID, onlyParticipated, before, limit)

@@ -405,6 +405,8 @@ func (r *messagesReq) retrieveEvents(ctx context.Context, rsAPI api.SyncRoomserv
 		filteredEvents = reversed(filteredEvents)
 	}
 
+	filteredEvents = internal.BundleRelations(ctx, r.snapshot, rsAPI, r.deviceUserID, filteredEvents)
+
 	start = *r.from
 
 	return synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(filteredEvents), synctypes.FormatAll, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {

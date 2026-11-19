@@ -725,3 +725,22 @@ type ThreadEntry struct {
 	// Participated is set if the user sent the root or a reply.
 	Participated bool
 }
+
+// RelationChild is an event that relates to another one.
+type RelationChild struct {
+	EventID string
+	Sender  string
+}
+
+// RelationBundles is what is known of the events that relate to some events, for bundling it with them.
+type RelationBundles struct {
+	// Threads has a summary of the replies of each event that has some. The count and the latest reply include
+	// the replies of ignored users, see ThreadChildren.
+	Threads map[string]ThreadEntry
+	// ThreadChildren has the replies of each thread, oldest first, if it was asked for.
+	ThreadChildren map[string][]RelationChild
+	// Edits has the events that replace each event and may be valid: by the sender of the event and of its type.
+	Edits map[string][]string
+	// References has the events that reference each event, oldest first.
+	References map[string][]RelationChild
+}

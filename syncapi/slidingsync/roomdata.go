@@ -18,6 +18,7 @@ import (
 
 	"github.com/element-hq/dendrite/internal/eventutil"
 	rstypes "github.com/element-hq/dendrite/roomserver/types"
+	"github.com/element-hq/dendrite/syncapi/internal"
 	"github.com/element-hq/dendrite/syncapi/storage"
 	"github.com/element-hq/dendrite/syncapi/streams"
 	"github.com/element-hq/dendrite/syncapi/synctypes"
@@ -218,9 +219,18 @@ func (h *Handler) timeline(
 		return roomTimeline{limited: true}, nil
 	}
 
+	// Only report a gap if history visibility did not itself remove events.
+	limited := recent.Limited && len(events) == len(streamEvents)
+	// The aggregations of relations are for timelines the client has nothing to aggregate into: the first one of a
+	// room, and the ones with a gap.
+	if liveSince == nil || limited {
+		if uid, uerr := spec.NewUserID(device.UserID, true); uerr == nil {
+			events = internal.BundleRelations(ctx, snapshot, h.rsAPI, *uid, events)
+		}
+	}
+
 	out := roomTimeline{
-		// Only report a gap if history visibility did not itself remove events.
-		limited: recent.Limited && len(events) == len(streamEvents),
+		limited: limited,
 		events:  h.clientEvents(ctx, events),
 		raw:     events,
 	}
