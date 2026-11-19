@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/sirupsen/logrus"
 )
 
 // configResponse is the response to GET /_matrix/media/r0/config
@@ -82,6 +83,14 @@ func Setup(
 	})
 
 	v3mux.Handle("/upload", uploadHandler).Methods(http.MethodPost, http.MethodOptions)
+
+	if previewer, err := newURLPreviewer(&cfg.MediaAPI); err != nil {
+		logrus.WithError(err).Fatal("URL previews are misconfigured")
+	} else if previewer != nil {
+		previewHandler := makePreviewURLHandler(&cfg.MediaAPI, previewer, userAPI, rateLimits, db, activeThumbnailGeneration)
+		v3mux.Handle("/preview_url", previewHandler).Methods(http.MethodGet, http.MethodOptions)
+		v1mux.Handle("/preview_url", previewHandler).Methods(http.MethodGet, http.MethodOptions)
+	}
 	v3mux.Handle("/config", configHandler).Methods(http.MethodGet, http.MethodOptions)
 
 	activeRemoteRequests := &types.ActiveRemoteRequests{

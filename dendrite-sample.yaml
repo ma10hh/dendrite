@@ -318,6 +318,25 @@ media_api:
       height: 480
       method: scale
 
+  # URL previews: GET /preview_url returns the title, description and image of a page that a user links to.
+  # Off by default, because it makes this server connect to addresses that users name. Connections to private,
+  # loopback, link local and reserved addresses are always refused (also after redirects and for names that resolve
+  # to them), so previews cannot be used to reach the network behind the server.
+  url_previews:
+    enabled: false
+    # How much of a page is read to find its tags.
+    max_page_size_bytes: 4194304
+    # The time a page or an image may take, with redirects.
+    timeout: 15s
+    # How long a preview is kept.
+    cache_lifetime: 1h
+    # How many previews are made at the same time. More are answered with a 429.
+    max_concurrent: 10
+    # More ranges to refuse, in CIDR notation.
+    ip_range_denylist: []
+    # Ranges to allow although they would be refused, for servers in the network that are safe to preview.
+    ip_range_allowlist: []
+
 # Configuration for enabling experimental MSCs on this homeserver.
 mscs:
   mscs:
