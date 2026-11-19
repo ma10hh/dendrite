@@ -364,3 +364,15 @@ func (s *DeviceOrServerName) Device() *userapi.Device {
 func (s *DeviceOrServerName) ServerName() *spec.ServerName {
 	return s.serverName
 }
+
+// PartialState says that this server joined a room before it had all of its state: the memberships were left out,
+// to be fetched in the background. The room has one until its state is whole.
+type PartialState struct {
+	RoomNID RoomNID
+	// JoinEventID is the event of the join, the state at which is the one to fetch.
+	JoinEventID string
+	// Servers are the servers that were in the room, to fetch the state from.
+	Servers []string
+	// JoinedAt is when the join happened, in milliseconds since the epoch.
+	JoinedAt int64
+}

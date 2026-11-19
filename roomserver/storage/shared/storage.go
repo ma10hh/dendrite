@@ -45,6 +45,7 @@ type Database struct {
 	InvitesTable       tables.Invites
 	MembershipTable    tables.Membership
 	PublishedTable     tables.Published
+	PartialStateTable  tables.PartialStateRooms
 	Purge              tables.Purge
 	UserRoomKeyTable   tables.UserRoomKeys
 	GetRoomUpdaterFn   func(ctx context.Context, roomInfo *types.RoomInfo) (*RoomUpdater, error)
@@ -2277,3 +2278,27 @@ func (s stateEntryByStateKeySorter) Less(i, j int) bool {
 	return s[i].StateKeyTuple.LessThan(s[j].StateKeyTuple)
 }
 func (s stateEntryByStateKeySorter) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
+
+// MarkRoomPartialState records that the room was joined with part of its state left out.
+func (d *Database) MarkRoomPartialState(ctx context.Context, state types.PartialState) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		return d.PartialStateTable.InsertPartialState(ctx, txn, state)
+	})
+}
+
+// PartialStateOfRoom returns the record of a room with partial state, or nil if its state is whole.
+func (d *Database) PartialStateOfRoom(ctx context.Context, roomNID types.RoomNID) (*types.PartialState, error) {
+	return d.PartialStateTable.SelectPartialState(ctx, nil, roomNID)
+}
+
+// PartialStateRooms returns the rooms with partial state, the ones joined first at the start.
+func (d *Database) PartialStateRooms(ctx context.Context) ([]types.PartialState, error) {
+	return d.PartialStateTable.SelectAllPartialState(ctx, nil)
+}
+
+// ClearRoomPartialState records that the state of the room is whole.
+func (d *Database) ClearRoomPartialState(ctx context.Context, roomNID types.RoomNID) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		return d.PartialStateTable.DeletePartialState(ctx, txn, roomNID)
+	})
+}

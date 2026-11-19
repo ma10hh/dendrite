@@ -276,3 +276,15 @@ func ExtractContentValue(ev *types.HeaderedEvent) string {
 	// this returns the empty string if this is not a string type
 	return result.Str
 }
+
+// PartialStateRooms are the rooms that were joined with part of their state left out, until it has been fetched.
+type PartialStateRooms interface {
+	// InsertPartialState marks the room. A second call for the same room replaces the first.
+	InsertPartialState(ctx context.Context, txn *sql.Tx, state types.PartialState) error
+	// SelectPartialState returns the mark of the room, or nil if its state is whole.
+	SelectPartialState(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) (*types.PartialState, error)
+	// SelectAllPartialState returns the marks of all rooms, the oldest first.
+	SelectAllPartialState(ctx context.Context, txn *sql.Tx) ([]types.PartialState, error)
+	// DeletePartialState removes the mark of the room.
+	DeletePartialState(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) error
+}

@@ -22,6 +22,7 @@ import (
 
 type Database interface {
 	UserRoomKeys
+	PartialState
 	ReportedEvents
 	// Do we support processing input events for more than one room at a time?
 	SupportsConcurrentRoomInputs() bool
@@ -215,6 +216,7 @@ type UserRoomKeys interface {
 }
 
 type RoomDatabase interface {
+	PartialState
 	EventDatabase
 	UserRoomKeys
 	AssignRoomNID(ctx context.Context, roomID spec.RoomID, roomVersion gomatrixserverlib.RoomVersion) (roomNID types.RoomNID, err error)
@@ -257,6 +259,14 @@ type EventDatabase interface {
 		ctx context.Context, roomInfo *types.RoomInfo, eventNID types.EventNID, event gomatrixserverlib.PDU, plResolver state.PowerLevelResolver, querier api.QuerySenderIDAPI,
 	) (gomatrixserverlib.PDU, gomatrixserverlib.PDU, error)
 	StoreEvent(ctx context.Context, event gomatrixserverlib.PDU, roomInfo *types.RoomInfo, eventTypeNID types.EventTypeNID, eventStateKeyNID types.EventStateKeyNID, authEventNIDs []types.EventNID, isRejected bool) (types.EventNID, types.StateAtEvent, error)
+}
+
+// PartialState is what the roomserver knows of the rooms that were joined with partial state.
+type PartialState interface {
+	MarkRoomPartialState(ctx context.Context, state types.PartialState) error
+	PartialStateOfRoom(ctx context.Context, roomNID types.RoomNID) (*types.PartialState, error)
+	PartialStateRooms(ctx context.Context) ([]types.PartialState, error)
+	ClearRoomPartialState(ctx context.Context, roomNID types.RoomNID) error
 }
 
 type ReportedEvents interface {

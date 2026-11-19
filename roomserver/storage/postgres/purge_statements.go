@@ -41,6 +41,9 @@ const purgePreviousEvents2SQL = "" +
 const purgePublishedSQL = "" +
 	"DELETE FROM roomserver_published WHERE room_id = $1"
 
+const purgePartialStateSQL = "" +
+	"DELETE FROM roomserver_partial_state_rooms WHERE room_nid = $1"
+
 const purgeRedactionsSQL = "" +
 	"DELETE FROM roomserver_redactions WHERE redaction_event_id = ANY(" +
 	"	SELECT event_id FROM roomserver_events WHERE room_nid = $1" +
@@ -68,6 +71,7 @@ type purgeStatements struct {
 	purgePreviousEventsStmt       *sql.Stmt
 	purgePreviousEvents2Stmt      *sql.Stmt
 	purgePublishedStmt            *sql.Stmt
+	purgePartialStateStmt         *sql.Stmt
 	purgeRedactionStmt            *sql.Stmt
 	purgeRoomAliasesStmt          *sql.Stmt
 	purgeRoomStmt                 *sql.Stmt
@@ -84,6 +88,7 @@ func PreparePurgeStatements(db *sql.DB) (*purgeStatements, error) {
 		{&s.purgeInvitesStmt, purgeInvitesSQL},
 		{&s.purgeMembershipsStmt, purgeMembershipsSQL},
 		{&s.purgePublishedStmt, purgePublishedSQL},
+		{&s.purgePartialStateStmt, purgePartialStateSQL},
 		{&s.purgePreviousEventsStmt, purgePreviousEventsSQL},
 		{&s.purgePreviousEvents2Stmt, purgePreviousEvents2SQL},
 		{&s.purgeRedactionStmt, purgeRedactionsSQL},
@@ -114,6 +119,7 @@ func (s *purgeStatements) PurgeRoom(
 	purgeByRoomNID := []*sql.Stmt{
 		s.purgeStateBlockEntriesStmt,
 		s.purgeStateSnapshotEntriesStmt,
+		s.purgePartialStateStmt,
 		s.purgeInvitesStmt,
 		s.purgeMembershipsStmt,
 		s.purgePreviousEvents2Stmt, // Fast purge the majority of events
