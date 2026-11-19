@@ -188,10 +188,14 @@ func Context(
 		"room_id":  roomID,
 	}).Debug("applied history visibility (context eventsBefore/eventsAfter)")
 
-	// TODO: Get the actual state at the last event returned by SelectContextAfterEvent
-	state, err := snapshot.CurrentState(ctx, roomID, &stateFilter, nil)
+	// The state is the one after the last event shown, which is the requested event if nothing follows it.
+	lastEventID := requestedEvent.EventID()
+	if n := len(eventsAfterFiltered); n > 0 {
+		lastEventID = eventsAfterFiltered[n-1].EventID()
+	}
+	state, err := contextState(ctx, snapshot, rsAPI, roomID, lastEventID, &stateFilter)
 	if err != nil {
-		logrus.WithError(err).Error("unable to fetch current room state")
+		logrus.WithError(err).Error("unable to fetch room state")
 		return util.JSONResponse{
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
@@ -212,7 +216,16 @@ func Context(
 		evs := synctypes.ToClientEvents(gomatrixserverlib.ToPDUs(allEvents), synctypes.FormatAll, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return rsAPI.QueryUserIDForSender(ctx, roomID, senderID)
 		})
-		newState, err = applyLazyLoadMembers(ctx, device, snapshot, roomID, evs, lazyLoadCache)
+		// All the state but the members, which are the ones of the senders.
+		newState = make([]*rstypes.HeaderedEvent, 0, len(state))
+		for _, e := range state {
+			if e.Type() != spec.MRoomMember {
+				newState = append(newState, e)
+			}
+		}
+		var members []*rstypes.HeaderedEvent
+		members, err = applyLazyLoadMembers(ctx, device, snapshot, rsAPI, roomID, lastEventID, evs, lazyLoadCache)
+		newState = append(newState, members...)
 		if err != nil {
 			logrus.WithError(err).Error("unable to load membership events")
 			return util.JSONResponse{
@@ -234,9 +247,6 @@ func Context(
 		}),
 	}
 
-	if len(response.State) > filter.Limit {
-		response.State = response.State[len(response.State)-filter.Limit:]
-	}
 	start, end, err := getStartEnd(ctx, snapshot, eventsBefore, eventsAfter)
 	if err == nil {
 		response.End = end.String()
@@ -304,7 +314,8 @@ func applyLazyLoadMembers(
 	ctx context.Context,
 	device *userapi.Device,
 	snapshot storage.DatabaseTransaction,
-	roomID string,
+	rsAPI roomserver.SyncRoomserverAPI,
+	roomID, atEventID string,
 	events []synctypes.ClientEvent,
 	lazyLoadCache caching.LazyLoadCache,
 ) ([]*rstypes.HeaderedEvent, error) {
@@ -323,13 +334,28 @@ func applyLazyLoadMembers(
 		wantUsers = append(wantUsers, userID)
 	}
 
-	// Query missing membership events
-	filter := synctypes.DefaultStateFilter()
-	filter.Senders = &wantUsers
-	filter.Types = &[]string{spec.MRoomMember}
-	memberships, err := snapshot.GetStateEventsForRoom(ctx, roomID, &filter)
-	if err != nil {
-		return nil, err
+	// Query missing membership events, as they were at the last event
+	tuples := make([]gomatrixserverlib.StateKeyTuple, 0, len(wantUsers))
+	for _, userID := range wantUsers {
+		tuples = append(tuples, gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomMember, StateKey: userID})
+	}
+	var memberships []*rstypes.HeaderedEvent
+	if len(tuples) > 0 {
+		var err error
+		ok := false
+		if atEventID != "" {
+			if memberships, ok, err = stateAtEvent(ctx, rsAPI, roomID, atEventID, tuples); err != nil {
+				return nil, err
+			}
+		}
+		if !ok {
+			filter := synctypes.DefaultStateFilter()
+			filter.Senders = &wantUsers
+			filter.Types = &[]string{spec.MRoomMember}
+			if memberships, err = snapshot.GetStateEventsForRoom(ctx, roomID, &filter); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// cache the membership events

@@ -214,8 +214,6 @@ func OnIncomingMessagesRequest(
 		wasToProvided = false
 	}
 
-	// TODO: Implement filtering (#587)
-
 	// If the user already left the room, grep events from before that
 	if membershipResp.Membership == spec.Leave {
 		var token types.TopologyToken
@@ -277,7 +275,7 @@ func OnIncomingMessagesRequest(
 		End:   end.String(),
 	}
 	if filter.LazyLoadMembers {
-		membershipEvents, err := applyLazyLoadMembers(req.Context(), device, snapshot, roomID, clientEvents, lazyLoadCache)
+		membershipEvents, err := applyLazyLoadMembers(req.Context(), device, snapshot, nil, roomID, "", clientEvents, lazyLoadCache)
 		if err != nil {
 			util.GetLogger(req.Context()).WithError(err).Error("failed to apply lazy loading")
 			return util.JSONResponse{

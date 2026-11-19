@@ -1133,7 +1133,7 @@ func testContext(t *testing.T, dbType test.DBType) {
 			params: map[string]string{
 				"filter": `{"lazy_load_members":true}`,
 			},
-			wantStateLength: 1,
+			wantStateLength: 5,
 		},
 		{
 			name:      "invalid room",
@@ -1146,11 +1146,11 @@ func testContext(t *testing.T, dbType test.DBType) {
 			wantError: true,
 		},
 		{
-			name: "state is limited",
+			name: "state is not limited by the limit of events",
 			params: map[string]string{
 				"limit": "1",
 			},
-			wantStateLength: 1,
+			wantStateLength: 5,
 		},
 		{
 			name:             "events are not limited",
@@ -1161,7 +1161,7 @@ func testContext(t *testing.T, dbType test.DBType) {
 			params: map[string]string{
 				"limit": "1",
 			},
-			wantStateLength:  1,
+			wantStateLength:  5,
 			wantBeforeLength: 1,
 			wantAfterLength:  1,
 		},
@@ -1485,4 +1485,136 @@ func toNATSMsgs(t *testing.T, cfg *config.Dendrite, input ...*rstypes.HeaderedEv
 		})
 	}
 	return result
+}
+
+// The state returned by /context is the state after the last event shown, not the current state.
+func TestContextStateAtEvent(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		user := test.NewUser(t)
+		alice := userapi.Device{ID: "ALICEID", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
+		// Every device gets the lazy loaded members once, so each question is asked by a device of its own.
+		second := userapi.Device{ID: "ALICEID2", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN_2", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
+
+		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
+		routers := httputil.NewRouters()
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		defer close()
+
+		natsInstance := jetstream.NATSInstance{}
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+		rsAPI.SetFederationAPI(nil, nil)
+		AddPublicRoutes(processCtx, routers, cfg, cm, &natsInstance, &syncUserAPI{accounts: []userapi.Device{alice, second}}, rsAPI, caches, caching.DisableMetrics)
+
+		room := test.NewRoom(t, user)
+		room.CreateAndInsert(t, user, spec.MRoomMember, map[string]interface{}{"membership": "join", "displayname": "Before"}, test.WithStateKey(user.ID))
+		first := room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"body": "the message"})
+		room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"body": "the next message"})
+		room.CreateAndInsert(t, user, spec.MRoomMember, map[string]interface{}{"membership": "join", "displayname": "After"}, test.WithStateKey(user.ID))
+		if err := api.SendEvents(context.Background(), rsAPI, api.KindNew, room.Events(), "test", "test", "test", nil, false); err != nil {
+			t.Fatalf("failed to send events: %v", err)
+		}
+		jsctx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
+		defer jetstream.DeleteAllStreams(jsctx, &cfg.Global.JetStream)
+		syncUntil(t, routers, alice.AccessToken, false, func(syncBody string) bool {
+			return gjson.Get(syncBody, fmt.Sprintf(`rooms.join.%s.state.#(content.displayname=="After")`, room.ID)).Exists() ||
+				gjson.Get(syncBody, fmt.Sprintf(`rooms.join.%s.timeline.events.#(content.displayname=="After")`, room.ID)).Exists()
+		})
+
+		displayName := func(token, limit string) string {
+			t.Helper()
+			w := httptest.NewRecorder()
+			routers.Client.ServeHTTP(w, test.NewRequest(t, "GET", fmt.Sprintf("/_matrix/client/v3/rooms/%s/context/%s", room.ID, first.EventID()), test.WithQueryParams(map[string]string{
+				"access_token": token,
+				"limit":        limit,
+				"filter":       `{"lazy_load_members":true}`,
+			})))
+			if w.Code != 200 {
+				t.Fatalf("context answered %d: %s", w.Code, w.Body.String())
+			}
+			return gjson.Get(w.Body.String(), fmt.Sprintf(`state.#(state_key=="%s").content.displayname`, user.ID)).String()
+		}
+
+		// The next message is the last one shown: the name changed after it.
+		if got := displayName(alice.AccessToken, "2"); got != "Before" {
+			t.Errorf("state at the last event shown: want display name Before, got %q", got)
+		}
+		// With the change itself in view, the state is the one after it.
+		if got := displayName(second.AccessToken, "10"); got != "After" {
+			t.Errorf("state at the last event shown: want display name After, got %q", got)
+		}
+	})
+}
+
+func TestMessagesFilter(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		user := test.NewUser(t)
+		other := test.NewUser(t)
+		alice := userapi.Device{ID: "ALICEID", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
+
+		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
+		routers := httputil.NewRouters()
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		defer close()
+
+		natsInstance := jetstream.NATSInstance{}
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+		rsAPI.SetFederationAPI(nil, nil)
+		AddPublicRoutes(processCtx, routers, cfg, cm, &natsInstance, &syncUserAPI{accounts: []userapi.Device{alice}}, rsAPI, caches, caching.DisableMetrics)
+
+		room := test.NewRoom(t, user)
+		room.CreateAndInsert(t, other, spec.MRoomMember, map[string]interface{}{"membership": "join"}, test.WithStateKey(other.ID))
+		room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"body": "from alice"})
+		room.CreateAndInsert(t, other, "m.room.message", map[string]interface{}{"body": "from the other user"})
+		room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"body": "with a link", "url": "mxc://test/abc"})
+		room.CreateAndInsert(t, user, "m.reaction", map[string]interface{}{"key": "x"})
+		last := room.CreateAndInsert(t, user, "m.room.message", map[string]interface{}{"body": "last"})
+		if err := api.SendEvents(context.Background(), rsAPI, api.KindNew, room.Events(), "test", "test", "test", nil, false); err != nil {
+			t.Fatalf("failed to send events: %v", err)
+		}
+		jsctx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
+		defer jetstream.DeleteAllStreams(jsctx, &cfg.Global.JetStream)
+		syncUntil(t, routers, alice.AccessToken, false, func(syncBody string) bool {
+			return gjson.Get(syncBody, fmt.Sprintf(`rooms.join.%s.timeline.events.#(event_id=="%s")`, room.ID, last.EventID())).Exists()
+		})
+
+		bodies := func(filter string) []string {
+			t.Helper()
+			w := httptest.NewRecorder()
+			routers.Client.ServeHTTP(w, test.NewRequest(t, "GET", fmt.Sprintf("/_matrix/client/v3/rooms/%s/messages", room.ID), test.WithQueryParams(map[string]string{
+				"access_token": alice.AccessToken,
+				"dir":          "f",
+				"from":         "t0_0",
+				"limit":        "50",
+				"filter":       filter,
+			})))
+			if w.Code != 200 {
+				t.Fatalf("messages answered %d: %s", w.Code, w.Body.String())
+			}
+			var out []string
+			for _, ev := range gjson.Get(w.Body.String(), "chunk").Array() {
+				out = append(out, ev.Get("type").String()+":"+ev.Get("content.body").String())
+			}
+			return out
+		}
+
+		for _, tc := range []struct {
+			name, filter string
+			want         []string
+		}{
+			{"types", `{"types":["m.room.message"],"senders":["` + other.ID + `"]}`, []string{"m.room.message:from the other user"}},
+			{"not_types", `{"types":["m.room.*"],"not_types":["m.room.member","m.room.create","m.room.power_levels","m.room.join_rules","m.room.history_visibility"],"not_senders":["` + other.ID + `"]}`,
+				[]string{"m.room.message:from alice", "m.room.message:with a link", "m.room.message:last"}},
+			{"contains_url", `{"types":["m.room.message"],"contains_url":true}`, []string{"m.room.message:with a link"}},
+			{"no url", `{"types":["m.room.message"],"contains_url":false,"senders":["` + user.ID + `"]}`, []string{"m.room.message:from alice", "m.room.message:last"}},
+			{"reactions only", `{"types":["m.reaction"]}`, []string{"m.reaction:"}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if got := bodies(tc.filter); !reflect.DeepEqual(got, tc.want) {
+					t.Errorf("filter %s: got %v, want %v", tc.filter, got, tc.want)
+				}
+			})
+		}
+	})
 }

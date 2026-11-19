@@ -3,6 +3,7 @@ package sqlite3
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/element-hq/dendrite/internal/sqlutil"
 )
@@ -50,21 +51,19 @@ func prepareWithFilters(
 		}
 	}
 	if types != nil {
-		if count := len(*types); count > 0 {
-			query += " AND type IN " + sqlutil.QueryVariadicOffset(count, offset)
-			for _, v := range *types {
-				params, offset = append(params, v), offset+1
-			}
+		if len(*types) > 0 {
+			var clause string
+			clause, params, offset = typeClause(*types, false, params, offset)
+			query += " AND " + clause
 		} else {
 			query += ` AND type = ""`
 		}
 	}
 	if nottypes != nil {
-		if count := len(*nottypes); count > 0 {
-			query += " AND type NOT IN " + sqlutil.QueryVariadicOffset(count, offset)
-			for _, v := range *nottypes {
-				params, offset = append(params, v), offset+1
-			}
+		if len(*nottypes) > 0 {
+			var clause string
+			clause, params, offset = typeClause(*nottypes, true, params, offset)
+			query += " AND " + clause
 		} else {
 			query += ` AND type != ""`
 		}
@@ -100,4 +99,42 @@ func prepareWithFilters(
 		return nil, nil, fmt.Errorf("s.db.Prepare: %w", err)
 	}
 	return stmt, params, nil
+}
+
+// typeClause matches the type column against event types, any of which may end in a * that stands for any characters.
+// The clause is true for a type that matches one of them, or for one that matches none of them if negate is set.
+func typeClause(patterns []string, negate bool, params []interface{}, offset int) (string, []interface{}, int) {
+	var exact, like []string
+	for _, p := range patterns {
+		if strings.Contains(p, "*") {
+			escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(p)
+			like = append(like, strings.ReplaceAll(escaped, "*", "%"))
+		} else {
+			exact = append(exact, p)
+		}
+	}
+	var parts []string
+	if len(exact) > 0 {
+		op := "IN"
+		if negate {
+			op = "NOT IN"
+		}
+		parts = append(parts, "type "+op+" "+sqlutil.QueryVariadicOffset(len(exact), offset))
+		for _, v := range exact {
+			params, offset = append(params, v), offset+1
+		}
+	}
+	for _, v := range like {
+		op := "LIKE"
+		if negate {
+			op = "NOT LIKE"
+		}
+		parts = append(parts, fmt.Sprintf(`type %s $%d ESCAPE '\'`, op, offset+1))
+		params, offset = append(params, v), offset+1
+	}
+	join := " OR "
+	if negate {
+		join = " AND "
+	}
+	return "(" + strings.Join(parts, join) + ")", params, offset
 }
