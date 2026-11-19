@@ -5,6 +5,9 @@
 Dendrite is a second-generation Matrix homeserver written in Go. It is currently in maintenance mode,
 meaning only security fixes are being applied, for example [room version 12](https://matrix.org/blog/2025/08/security-release/).
 
+> **This is a fork of [element-hq/dendrite](https://github.com/element-hq/dendrite)** that adds experimental support for
+> Simplified Sliding Sync (MSC4186), which Element X needs. See [Trying out this fork](#trying-out-this-fork).
+
 It intends to provide an **efficient** and **reliable** alternative to [Synapse](https://github.com/matrix-org/synapse):
 
 - Efficient: A small memory footprint with better baseline performance than an out-of-the-box Synapse.
@@ -32,8 +35,54 @@ If you have further questions, please take a look at [our FAQ](docs/FAQ.md) or j
 - **[#dendrite-alerts:matrix.org](https://matrix.to/#/#dendrite-alerts:matrix.org)** - Release notifications and important info, highly recommended for all Dendrite server admins
 
 Dendrite does not currently support the following MSCs, which impacts the ability to use Element X with Dendrite servers:
- - [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186): Simplified Sliding Sync
  - [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861): Next-gen auth OIDC
+
+## Trying out this fork
+
+This fork adds **experimental support for Simplified Sliding Sync ([MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186))**,
+the API [Element X](https://element.io/) uses for fast login and sync. Upstream Dendrite is in maintenance mode and does not
+have it, so Element X cannot sync with it. There is nothing to enable: build this fork, run it like any Dendrite, and it
+advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
+
+**Status: experimental, and not yet tried with a real Element X client.**
+
+- It is covered by unit and integration tests on both SQLite and PostgreSQL, and was exercised end to end with `curl`
+  against a running server. Expect rough edges and please report what you find.
+- Supported: room lists with ranges and filters, room subscriptions, `required_state`, incremental updates with long polling,
+  invites, knocks, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions.
+- Not supported: presence (`set_presence` is ignored), and sign-in with OIDC ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)),
+  which upstream Dendrite does not have either. Whether Element X can sign in to a Dendrite server was not verified.
+
+To try it:
+
+```bash
+$ git clone <the URL of this repository>
+$ cd dendrite
+# Go 1.25 is what the Dockerfiles use. With Nix, `nix-shell` provides Go and the other tools.
+$ go build -o bin/ ./cmd/dendrite ./cmd/generate-keys ./cmd/create-account
+```
+
+Then follow [Get started](#get-started) below and check that the server advertises the feature:
+
+```bash
+$ curl http://localhost:8008/_matrix/client/versions | grep simplified_msc3575
+```
+
+In Element X, enter your server's address as the homeserver.
+
+Things to know:
+
+- **Reverse proxies** need a read timeout of more than three minutes, because requests that wait for changes are held open that long.
+  nginx's default of 60 seconds is too short. The [sample nginx configuration](docs/nginx/dendrite-sample.conf) already sets
+  `proxy_read_timeout` to 600 seconds.
+- **No database changes.** This fork adds no tables or migrations, and keeps sliding sync sessions in memory, so you can switch between it and
+  upstream Dendrite without migrating. After a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle.
+- **Report problems on this fork's issue tracker, not upstream's**, since upstream does not maintain this code. Include the Dendrite
+  log around the time and what Element X showed.
+
+More detail: [what is supported and how it behaves](docs/other/sliding-sync.md), and the
+[decision log](docs/development/sliding-sync-decisions.md) with design choices, sources and open questions.
+The code is in [`syncapi/slidingsync`](syncapi/slidingsync).
 
 ## Requirements
 
@@ -62,7 +111,7 @@ If you wish to build a fully-federating Dendrite instance, see [the Installation
 The following instructions are enough to get Dendrite started as a non-federating test deployment using self-signed certificates and SQLite databases:
 
 ```bash
-$ git clone https://github.com/element-hq/dendrite
+$ git clone <the URL of this repository>
 $ cd dendrite
 $ go build -o bin/ ./cmd/...
 
