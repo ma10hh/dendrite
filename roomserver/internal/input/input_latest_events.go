@@ -399,6 +399,15 @@ func (u *latestEventsUpdater) makeOutputNewRoomEvent() (*api.OutputEvent, error)
 	if err != nil {
 		return nil, err
 	}
+	if u.rewritesState {
+		partial, perr := u.api.DB.PartialStateOfRoom(u.ctx, u.roomInfo.RoomNID)
+		if perr != nil {
+			return nil, perr
+		}
+		if partial != nil {
+			ore.PartialStateServers = partial.Servers
+		}
+	}
 	for _, entry := range u.added {
 		ore.AddsStateEventIDs = append(ore.AddsStateEventIDs, eventIDMap[entry.EventNID])
 	}

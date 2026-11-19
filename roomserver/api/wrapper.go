@@ -53,6 +53,18 @@ func SendEventWithState(
 	state gomatrixserverlib.StateResponse, event *types.HeaderedEvent,
 	origin spec.ServerName, haveEventIDs map[string]bool, async bool,
 ) error {
+	return SendEventWithPartialState(ctx, rsAPI, virtualHost, kind, state, event, origin, haveEventIDs, async, nil)
+}
+
+// SendEventWithPartialState is SendEventWithState for a state that leaves out the memberships of the room, if
+// partialStateServers has the servers to fetch them from.
+func SendEventWithPartialState(
+	ctx context.Context, rsAPI InputRoomEventsAPI,
+	virtualHost spec.ServerName, kind Kind,
+	state gomatrixserverlib.StateResponse, event *types.HeaderedEvent,
+	origin spec.ServerName, haveEventIDs map[string]bool, async bool,
+	partialStateServers []string,
+) error {
 	outliers := gomatrixserverlib.LineariseStateResponse(event.Version(), state)
 	ires := make([]InputRoomEvent, 0, len(outliers))
 	for _, outlier := range outliers {
@@ -85,6 +97,8 @@ func SendEventWithState(
 		Origin:        origin,
 		HasState:      true,
 		StateEventIDs: stateEventIDs,
+
+		PartialStateServers: partialStateServers,
 	})
 
 	return SendInputRoomEvents(ctx, rsAPI, virtualHost, ires, async)

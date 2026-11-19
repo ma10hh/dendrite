@@ -50,6 +50,10 @@ type FederationAPI struct {
 	// Deny/Allow lists used for restricting request scopes.
 	DenyNetworkCIDRs  []string `yaml:"deny_networks"`
 	AllowNetworkCIDRs []string `yaml:"allow_networks"`
+
+	// PartialStateJoins makes this server ask for the memberships to be left out when it joins a room over federation
+	// (MSC3706), and fetch them in the background, which makes joining a big room much faster. Experimental.
+	PartialStateJoins bool `yaml:"partial_state_joins"`
 }
 
 func (c *FederationAPI) Defaults(opts DefaultOpts) {

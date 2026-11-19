@@ -190,6 +190,7 @@ func (s *OutputRoomEventConsumer) processMessage(ore api.OutputNewRoomEvent, rew
 	if err != nil {
 		return err
 	}
+	addsJoinedHosts = WithPartialStateHosts(addsJoinedHosts, ore.PartialStateServers)
 	// Update our copy of the current state.
 	// We keep a copy of the current state because the state at each event is
 	// expressed as a delta against the current state.
@@ -531,4 +532,24 @@ func missingEventsFrom(events []gomatrixserverlib.PDU, required []string) []stri
 		}
 	}
 	return missing
+}
+
+// partialStateHostPrefix starts the member event ID of the hosts that are known from the servers in a room that was
+// joined with partial state, not from a membership event. They are all replaced when the state is whole.
+const partialStateHostPrefix = "partial-state:"
+
+// WithPartialStateHosts adds the servers of a room joined with partial state to the joined hosts, as the memberships
+// the hosts are found from are not all in the state, so events would not reach all servers.
+func WithPartialStateHosts(hosts []types.JoinedHost, servers []string) []types.JoinedHost {
+	known := make(map[spec.ServerName]bool, len(hosts))
+	for _, host := range hosts {
+		known[host.ServerName] = true
+	}
+	for _, server := range servers {
+		if name := spec.ServerName(server); !known[name] {
+			known[name] = true
+			hosts = append(hosts, types.JoinedHost{MemberEventID: partialStateHostPrefix + server, ServerName: name})
+		}
+	}
+	return hosts
 }

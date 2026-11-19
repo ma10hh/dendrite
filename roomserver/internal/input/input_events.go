@@ -458,6 +458,18 @@ func (r *Inputer) processRoomEvent(
 		}
 	}
 
+	// The room is joined with part of its state left out: it is marked until the rest has been fetched.
+	if input.Kind == api.KindNew && input.HasState && len(input.PartialStateServers) > 0 {
+		if err = r.DB.MarkRoomPartialState(ctx, types.PartialState{
+			RoomNID:     roomInfo.RoomNID,
+			JoinEventID: event.EventID(),
+			Servers:     input.PartialStateServers,
+			JoinedAt:    time.Now().UnixMilli(),
+		}); err != nil {
+			return fmt.Errorf("r.DB.MarkRoomPartialState: %w", err)
+		}
+	}
+
 	switch input.Kind {
 	case api.KindNew:
 		if err = r.updateLatestEvents(

@@ -191,7 +191,13 @@ func (r *FederationInternalAPI) performJoinUsingServer(
 			return r.rsAPI.StoreUserRoomPublicKey(ctx, senderID, *storeUserID, roomID)
 		},
 	}
-	response, joinErr := gomatrixserverlib.PerformJoin(ctx, r, joinInput)
+	var client gomatrixserverlib.FederatedJoinClient = r
+	var partialClient *partialJoinClient
+	if r.cfg.PartialStateJoins {
+		partialClient = &partialJoinClient{FederationInternalAPI: r}
+		client = partialClient
+	}
+	response, joinErr := gomatrixserverlib.PerformJoin(ctx, client, joinInput)
 
 	if joinErr != nil {
 		if !joinErr.Reachable {
@@ -217,13 +223,22 @@ func (r *FederationInternalAPI) performJoinUsingServer(
 		return fmt.Errorf("JoinedHostsFromEvents: failed to get joined hosts: %s", err)
 	}
 
+	// With the memberships left out, the servers that were named are in the room as well.
+	var partialStateServers []string
+	if partialClient != nil && partialClient.membersOmitted {
+		partialStateServers = partialClient.serversInRoom
+		if len(partialStateServers) == 0 {
+			partialStateServers = []string{string(serverName)}
+		}
+		joinedHosts = consumers.WithPartialStateHosts(joinedHosts, partialStateServers)
+	}
 	logrus.WithField("room", roomID).Infof("Joined federated room with %d hosts", len(joinedHosts))
 	if _, err = r.db.UpdateRoom(context.Background(), roomID, joinedHosts, nil, true); err != nil {
 		return fmt.Errorf("UpdatedRoom: failed to update room with joined hosts: %s", err)
 	}
 
 	// TODO: Can I change this to not take respState but instead just take an opaque list of events?
-	if err = roomserverAPI.SendEventWithState(
+	if err = roomserverAPI.SendEventWithPartialState(
 		context.Background(),
 		r.rsAPI,
 		user.Domain(),
@@ -233,6 +248,7 @@ func (r *FederationInternalAPI) performJoinUsingServer(
 		serverName,
 		nil,
 		false,
+		partialStateServers,
 	); err != nil {
 		return fmt.Errorf("roomserverAPI.SendEventWithState: %w", err)
 	}

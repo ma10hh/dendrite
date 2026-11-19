@@ -80,6 +80,9 @@ type InputRoomEvent struct {
 	// The transaction ID of the send request if sent by a local user and one
 	// was specified
 	TransactionID *TransactionID `json:"transaction_id"`
+	// If set, the state of this event leaves out the memberships of the room (the join of a server that asked for
+	// that), and these are the servers in the room to fetch the rest from. Only used with HasState.
+	PartialStateServers []string `json:"partial_state_servers,omitempty"`
 }
 
 // TransactionID contains the transaction ID sent by a client when sending an

@@ -272,6 +272,11 @@ federation_api:
   # last resort.
   prefer_direct_fetch: false
 
+  # Whether to join rooms of other servers without the memberships of the room, which are fetched in the
+  # background afterwards (MSC3706). Joining a big room takes seconds instead of minutes. Experimental: some
+  # requests that need all the members wait until they have arrived.
+  partial_state_joins: false
+
   # deny_networks and allow_networks are the CIDR ranges used to prevent requests
   # from accessing private IPs. If your system has specific IPs it should never
   # contact, add them here with CIDR notation.

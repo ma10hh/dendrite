@@ -207,3 +207,24 @@ func (a *FederationInternalAPI) RoomHierarchies(
 	}
 	return ires.(fclient.RoomHierarchyResponse), nil
 }
+
+// partialJoinClient joins rooms like the federation API does, but asks the server to leave the memberships of the room
+// out of the state it answers with, and notes whether it did.
+type partialJoinClient struct {
+	*FederationInternalAPI
+	membersOmitted bool
+	serversInRoom  []string
+}
+
+func (c *partialJoinClient) SendJoin(
+	ctx context.Context, origin, s spec.ServerName, event gomatrixserverlib.PDU,
+) (res gomatrixserverlib.SendJoinResponse, err error) {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute*5)
+	defer cancel()
+	ires, err := c.federation.SendJoinPartialState(ctx, origin, s, event)
+	if err != nil {
+		return &fclient.RespSendJoin{}, err
+	}
+	c.membersOmitted, c.serversInRoom = ires.MembersOmitted, ires.ServersInRoom
+	return &ires, nil
+}
