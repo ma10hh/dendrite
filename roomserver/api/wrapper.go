@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/element-hq/dendrite/roomserver/types"
@@ -164,13 +166,14 @@ func PopulatePublicRooms(ctx context.Context, roomIDs []string, rsAPI QueryBulkS
 	guestTuple := gomatrixserverlib.StateKeyTuple{EventType: "m.room.guest_access", StateKey: ""}
 	visibilityTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomHistoryVisibility, StateKey: ""}
 	joinRuleTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomJoinRules, StateKey: ""}
+	createTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomCreate, StateKey: ""}
 
 	var stateRes QueryBulkStateContentResponse
 	err := rsAPI.QueryBulkStateContent(ctx, &QueryBulkStateContentRequest{
 		RoomIDs:        roomIDs,
 		AllowWildcards: true,
 		StateTuples: []gomatrixserverlib.StateKeyTuple{
-			nameTuple, canonicalTuple, topicTuple, guestTuple, visibilityTuple, joinRuleTuple, avatarTuple,
+			nameTuple, canonicalTuple, topicTuple, guestTuple, visibilityTuple, joinRuleTuple, avatarTuple, createTuple,
 			{EventType: spec.MRoomMember, StateKey: "*"},
 		},
 	}, &stateRes)
@@ -194,6 +197,8 @@ func PopulatePublicRooms(ctx context.Context, roomIDs []string, rsAPI QueryBulkS
 			switch tuple {
 			case avatarTuple:
 				pub.AvatarURL = contentVal
+			case createTuple:
+				pub.RoomType = contentVal
 			case nameTuple:
 				pub.Name = contentVal
 			case topicTuple:
@@ -218,7 +223,29 @@ func PopulatePublicRooms(ctx context.Context, roomIDs []string, rsAPI QueryBulkS
 		chunk[i] = pub
 		i++
 	}
-	return chunk, nil
+	return chunk[:i], nil
+}
+
+// FilterPublicRooms keeps the rooms that match the search term (in the name, topic or canonical alias) and one of the
+// room types. A room type of "" stands for rooms that have none.
+func FilterPublicRooms(rooms []fclient.PublicRoom, searchTerm string, roomTypes []string) []fclient.PublicRoom {
+	if searchTerm == "" && len(roomTypes) == 0 {
+		return rooms
+	}
+	term := strings.ToLower(searchTerm)
+	result := make([]fclient.PublicRoom, 0, len(rooms))
+	for _, room := range rooms {
+		if term != "" && !strings.Contains(strings.ToLower(room.Name), term) &&
+			!strings.Contains(strings.ToLower(room.Topic), term) &&
+			!strings.Contains(strings.ToLower(room.CanonicalAlias), term) {
+			continue
+		}
+		if len(roomTypes) > 0 && !slices.Contains(roomTypes, room.RoomType) {
+			continue
+		}
+		result = append(result, room)
+	}
+	return result
 }
 
 func GenerateCreateContent(ctx context.Context, roomVer gomatrixserverlib.RoomVersion, senderID string, createContentJSON json.RawMessage, additionalCreators []string) (map[string]any, error) {

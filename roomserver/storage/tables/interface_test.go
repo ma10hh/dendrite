@@ -5,9 +5,19 @@ import (
 
 	"github.com/element-hq/dendrite/roomserver/types"
 	"github.com/element-hq/dendrite/test"
+	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/stretchr/testify/assert"
 )
+
+func typedCreate(t *testing.T) *types.HeaderedEvent {
+	t.Helper()
+	ev, err := gomatrixserverlib.MustGetRoomVersion(gomatrixserverlib.RoomVersionV10).NewEventFromTrustedJSON([]byte(`{"type":"m.room.create","state_key":"","sender":"@a:test","room_id":"!r:test","origin_server_ts":1,"depth":1,"auth_events":[],"prev_events":[],"content":{"type":"m.space","room_version":"10"}}`), false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &types.HeaderedEvent{PDU: ev}
+}
 
 func TestExtractContentValue(t *testing.T) {
 	alice := test.NewUser(t)
@@ -19,9 +29,14 @@ func TestExtractContentValue(t *testing.T) {
 		want  string
 	}{
 		{
-			name:  "returns creator ID for create events",
+			name:  "returns nothing for create events of rooms without a type",
 			event: room.Events()[0],
-			want:  alice.ID,
+			want:  "",
+		},
+		{
+			name:  "returns the room type for create events",
+			event: typedCreate(t),
+			want:  "m.space",
 		},
 		{
 			name:  "returns the alias for canonical alias events",

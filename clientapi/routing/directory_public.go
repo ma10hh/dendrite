@@ -41,7 +41,7 @@ type PublicRoomReq struct {
 
 type filter struct {
 	SearchTerms string   `json:"generic_search_term,omitempty"`
-	RoomTypes   []string `json:"room_types,omitempty"` // TODO: Implement filter on this
+	RoomTypes   []string `json:"room_types,omitempty"` // null stands for rooms without a type
 }
 
 // GetPostPublicRooms implements GET and POST /publicRooms
@@ -129,7 +129,7 @@ func publicRooms(
 
 	response.TotalRoomCountEstimate = len(rooms)
 
-	rooms = filterRooms(rooms, request.Filter.SearchTerms)
+	rooms = roomserverAPI.FilterPublicRooms(rooms, request.Filter.SearchTerms, request.Filter.RoomTypes)
 
 	chunk, prev, next := sliceInto(rooms, offset, limit)
 	if prev >= 0 {
@@ -142,25 +142,6 @@ func publicRooms(
 		response.Chunk = chunk
 	}
 	return &response, err
-}
-
-func filterRooms(rooms []fclient.PublicRoom, searchTerm string) []fclient.PublicRoom {
-	if searchTerm == "" {
-		return rooms
-	}
-
-	normalizedTerm := strings.ToLower(searchTerm)
-
-	result := make([]fclient.PublicRoom, 0)
-	for _, room := range rooms {
-		if strings.Contains(strings.ToLower(room.Name), normalizedTerm) ||
-			strings.Contains(strings.ToLower(room.Topic), normalizedTerm) ||
-			strings.Contains(strings.ToLower(room.CanonicalAlias), normalizedTerm) {
-			result = append(result, room)
-		}
-	}
-
-	return result
 }
 
 // fillPublicRoomsReq fills the Limit, Since and Filter attributes of a GET or POST request

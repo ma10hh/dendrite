@@ -247,7 +247,7 @@ func ExtractContentValue(ev *types.HeaderedEvent) string {
 	key := ""
 	switch ev.Type() {
 	case spec.MRoomCreate:
-		key = "creator"
+		key = "type"
 	case spec.MRoomCanonicalAlias:
 		key = "alias"
 	case spec.MRoomHistoryVisibility:

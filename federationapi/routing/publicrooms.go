@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/fclient"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/matrix-org/util"
@@ -78,24 +77,37 @@ func publicRooms(
 		util.GetLogger(ctx).WithError(err).Error("QueryPublishedRooms failed")
 		return nil, err
 	}
-	response.TotalRoomCountEstimate = len(queryRes.RoomIDs)
+	// A search term or room types are matched against the state of the rooms, so every room has to be looked at.
+	filtering := request.Filter.SearchTerms != "" || len(request.Filter.RoomTypes) > 0
+	total := len(queryRes.RoomIDs)
+	var matching []fclient.PublicRoom
+	if filtering {
+		if matching, err = roomserverAPI.PopulatePublicRooms(ctx, queryRes.RoomIDs, rsAPI); err != nil {
+			return nil, err
+		}
+		matching = roomserverAPI.FilterPublicRooms(matching, request.Filter.SearchTerms, request.Filter.RoomTypes)
+		total = len(matching)
+	}
+	response.TotalRoomCountEstimate = total
 
 	if offset > 0 {
 		response.PrevBatch = strconv.Itoa(int(offset) - 1)
 	}
 	nextIndex := int(offset) + int(limit)
-	if response.TotalRoomCountEstimate > nextIndex {
+	if total > nextIndex {
 		response.NextBatch = strconv.Itoa(nextIndex)
 	}
 
 	if offset < 0 {
 		offset = 0
 	}
-	if nextIndex > len(queryRes.RoomIDs) {
-		nextIndex = len(queryRes.RoomIDs)
+	nextIndex = min(nextIndex, total)
+	offset = min(offset, int64(nextIndex))
+	if filtering {
+		response.Chunk = matching[offset:nextIndex]
+		return &response, nil
 	}
-	roomIDs := queryRes.RoomIDs[offset:nextIndex]
-	response.Chunk, err = fillInRooms(ctx, roomIDs, rsAPI)
+	response.Chunk, err = roomserverAPI.PopulatePublicRooms(ctx, queryRes.RoomIDs[offset:nextIndex], rsAPI)
 	return &response, err
 }
 
@@ -125,70 +137,4 @@ func fillPublicRoomsReq(httpReq *http.Request, request *PublicRoomReq) *util.JSO
 		Code: http.StatusMethodNotAllowed,
 		JSON: spec.NotFound("Bad method"),
 	}
-}
-
-// due to lots of switches
-func fillInRooms(ctx context.Context, roomIDs []string, rsAPI roomserverAPI.FederationRoomserverAPI) ([]fclient.PublicRoom, error) {
-	avatarTuple := gomatrixserverlib.StateKeyTuple{EventType: "m.room.avatar", StateKey: ""}
-	nameTuple := gomatrixserverlib.StateKeyTuple{EventType: "m.room.name", StateKey: ""}
-	canonicalTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomCanonicalAlias, StateKey: ""}
-	topicTuple := gomatrixserverlib.StateKeyTuple{EventType: "m.room.topic", StateKey: ""}
-	guestTuple := gomatrixserverlib.StateKeyTuple{EventType: "m.room.guest_access", StateKey: ""}
-	visibilityTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomHistoryVisibility, StateKey: ""}
-	joinRuleTuple := gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomJoinRules, StateKey: ""}
-
-	var stateRes roomserverAPI.QueryBulkStateContentResponse
-	err := rsAPI.QueryBulkStateContent(ctx, &roomserverAPI.QueryBulkStateContentRequest{
-		RoomIDs:        roomIDs,
-		AllowWildcards: true,
-		StateTuples: []gomatrixserverlib.StateKeyTuple{
-			nameTuple, canonicalTuple, topicTuple, guestTuple, visibilityTuple, joinRuleTuple, avatarTuple,
-			{EventType: spec.MRoomMember, StateKey: "*"},
-		},
-	}, &stateRes)
-	if err != nil {
-		util.GetLogger(ctx).WithError(err).Error("QueryBulkStateContent failed")
-		return nil, err
-	}
-	chunk := make([]fclient.PublicRoom, len(roomIDs))
-	i := 0
-	for roomID, data := range stateRes.Rooms {
-		pub := fclient.PublicRoom{
-			RoomID: roomID,
-		}
-		joinCount := 0
-		var joinRule, guestAccess string
-		for tuple, contentVal := range data {
-			if tuple.EventType == spec.MRoomMember && contentVal == "join" {
-				joinCount++
-				continue
-			}
-			switch tuple {
-			case avatarTuple:
-				pub.AvatarURL = contentVal
-			case nameTuple:
-				pub.Name = contentVal
-			case topicTuple:
-				pub.Topic = contentVal
-			case canonicalTuple:
-				if _, _, err := gomatrixserverlib.SplitID('#', contentVal); err == nil {
-					pub.CanonicalAlias = contentVal
-				}
-			case visibilityTuple:
-				pub.WorldReadable = contentVal == "world_readable"
-			// need both of these to determine whether guests can join
-			case joinRuleTuple:
-				joinRule = contentVal
-			case guestTuple:
-				guestAccess = contentVal
-			}
-		}
-		if joinRule == spec.Public && guestAccess == "can_join" {
-			pub.GuestCanJoin = true
-		}
-		pub.JoinedMembersCount = joinCount
-		chunk[i] = pub
-		i++
-	}
-	return chunk, nil
 }
