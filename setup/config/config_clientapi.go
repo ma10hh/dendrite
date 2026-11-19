@@ -58,6 +58,9 @@ type ClientAPI struct {
 	// Delegate authentication to an external OAuth 2.0 / OpenID Connect provider (MSC3861).
 	MSC3861 MSC3861 `yaml:"msc3861"`
 
+	// Rendezvous sessions for signing in with a QR code (MSC4388).
+	Rendezvous Rendezvous `yaml:"rendezvous"`
+
 	MSCs *MSCs `yaml:"-"`
 }
 
@@ -165,4 +168,14 @@ func (r *RateLimiting) Defaults() {
 	r.Enabled = true
 	r.Threshold = 5
 	r.CooloffMS = 500
+}
+
+// Rendezvous configures the rendezvous sessions two devices use to sign in one device with
+// the other by scanning a QR code (MSC4388).
+type Rendezvous struct {
+	Enabled bool `yaml:"enabled"`
+	// If set anyone can create a rendezvous session, otherwise only users with an access token.
+	// Open sessions let a new device use this server before it has an account on it, but the
+	// server stores arbitrary short-lived data for anybody.
+	AllowUnauthenticated bool `yaml:"allow_unauthenticated"`
 }

@@ -319,6 +319,9 @@ func Setup(
 	if cfg.MSC3861.MASMode() {
 		setupMASRoutes(synapseAdminRouter, cfg, userAPI, rsAPI)
 	}
+	rendezvous := newRendezvousStore()
+	setupRendezvousRoutes(v1mux, cfg, userAPI, rateLimits, rendezvous, false)
+	setupRendezvousRoutes(unstableMux.PathPrefix("/io.element.msc4388").Subrouter(), cfg, userAPI, rateLimits, rendezvous, true)
 	v1mux.Handle("/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
 	unstableMux.Handle("/org.matrix.msc2965/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
 	unstableMux.Handle("/org.matrix.msc2965/auth_issuer", authIssuer(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
