@@ -27,11 +27,18 @@ func newRelationsTable(t *testing.T, dbType test.DBType) (tables.Relations, *sql
 	var tab tables.Relations
 	switch dbType {
 	case test.DBTypePostgres:
+		// The thread query reads the events table, which the sync server creates first.
+		if _, err = postgres.NewPostgresEventsTable(db); err != nil {
+			t.Fatalf("failed to make the events table: %s", err)
+		}
 		tab, err = postgres.NewPostgresRelationsTable(db)
 	case test.DBTypeSQLite:
 		var stream sqlite3.StreamIDStatements
 		if err = stream.Prepare(db); err != nil {
 			t.Fatalf("failed to prepare stream stmts: %s", err)
+		}
+		if _, err = sqlite3.NewSqliteEventsTable(db, &stream); err != nil {
+			t.Fatalf("failed to make the events table: %s", err)
 		}
 		tab, err = sqlite3.NewSqliteRelationsTable(db, &stream)
 	}

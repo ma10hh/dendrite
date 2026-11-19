@@ -155,6 +155,21 @@ func Setup(
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodGet, http.MethodOptions)
 
+	threads := func(name string) http.Handler {
+		return httputil.MakeAuthAPI(name, userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			if r := rateLimits.Limit(req, device); r != nil {
+				return *r
+			}
+			vars, err := httputil.URLDecodeMapValues(mux.Vars(req))
+			if err != nil {
+				return util.ErrorResponse(err)
+			}
+			return Threads(req, device, syncDB, rsAPI, vars["roomId"])
+		}, httputil.WithAllowGuests())
+	}
+	v1unstablemux.Handle("/rooms/{roomId}/threads", threads("threads")).Methods(http.MethodGet, http.MethodOptions)
+	v1unstablemux.Handle("/org.matrix.msc3856/rooms/{roomId}/threads", threads("threads_unstable")).Methods(http.MethodGet, http.MethodOptions)
+
 	v3mux.Handle("/search",
 		httputil.MakeAuthAPI("search", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			if !cfg.Fulltext.Enabled {

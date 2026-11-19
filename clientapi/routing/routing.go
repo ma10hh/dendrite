@@ -326,6 +326,26 @@ func Setup(
 	unstableMux.Handle("/org.matrix.msc2965/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
 	unstableMux.Handle("/org.matrix.msc2965/auth_issuer", authIssuer(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
 
+	roomSummary := func(name string, unstable bool) http.Handler {
+		return httputil.MakeExternalAPI(name, func(req *http.Request) util.JSONResponse {
+			device, errRes := optionalDevice(req, userAPI)
+			if errRes != nil {
+				return *errRes
+			}
+			if r := rateLimits.Limit(req, device); r != nil {
+				return *r
+			}
+			vars, err := httputil.URLDecodeMapValues(mux.Vars(req))
+			if err != nil {
+				return util.ErrorResponse(err)
+			}
+			return GetRoomSummary(req, device, vars["roomIdOrAlias"], unstable, cfg, rsAPI, federation)
+		})
+	}
+	v1mux.Handle("/room_summary/{roomIdOrAlias}", roomSummary("room_summary", false)).Methods(http.MethodGet, http.MethodOptions)
+	unstableMux.Handle("/im.nheko.summary/summary/{roomIdOrAlias}", roomSummary("room_summary_unstable", true)).Methods(http.MethodGet, http.MethodOptions)
+	unstableMux.Handle("/im.nheko.summary/rooms/{roomIdOrAlias}/summary", roomSummary("room_summary_unstable_rooms", true)).Methods(http.MethodGet, http.MethodOptions)
+
 	v3mux.Handle("/createRoom",
 		httputil.MakeAuthAPI("createRoom", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return CreateRoom(req, device, cfg, userAPI, rsAPI, asAPI)

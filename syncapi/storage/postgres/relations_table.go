@@ -64,6 +64,8 @@ type relationsStatements struct {
 	selectRelationsInRangeDescStmt *sql.Stmt
 	deleteRelationStmt             *sql.Stmt
 	selectMaxRelationIDStmt        *sql.Stmt
+	selectThreadsStmt              *sql.Stmt
+	selectParticipatedThreadsStmt  *sql.Stmt
 }
 
 func NewPostgresRelationsTable(db *sql.DB) (tables.Relations, error) {
@@ -78,6 +80,8 @@ func NewPostgresRelationsTable(db *sql.DB) (tables.Relations, error) {
 		{&s.selectRelationsInRangeDescStmt, selectRelationsInRangeDescSQL},
 		{&s.deleteRelationStmt, deleteRelationSQL},
 		{&s.selectMaxRelationIDStmt, selectMaxRelationIDSQL},
+		{&s.selectThreadsStmt, selectThreadsSQL},
+		{&s.selectParticipatedThreadsStmt, selectParticipatedThreadsSQL},
 	}.Prepare(db)
 }
 
@@ -147,4 +151,57 @@ func (s *relationsStatements) SelectMaxRelationID(
 	stmt := sqlutil.TxStmt(txn, s.selectMaxRelationIDStmt)
 	err = stmt.QueryRowContext(ctx).Scan(&id)
 	return
+}
+
+// The thread queries read the events table, so it has to exist before the statements of this table are prepared.
+// Threads are the events with m.thread relations. The user took part in a thread if they sent its root or one of its replies.
+const threadParticipationSQL = "" +
+	"(EXISTS (SELECT 1 FROM syncapi_output_room_events r WHERE r.event_id = t.event_id AND r.sender = $2)" +
+	" OR EXISTS (SELECT 1 FROM syncapi_relations c JOIN syncapi_output_room_events ce ON ce.event_id = c.child_event_id" +
+	" WHERE c.room_id = $1 AND c.event_id = t.event_id AND c.rel_type = 'm.thread' AND ce.sender = $2))"
+
+const selectThreadsSQL = "" +
+	"SELECT t.event_id, t.latest, t.cnt," +
+	" (SELECT l.child_event_id FROM syncapi_relations l WHERE l.id = t.latest)," +
+	" " + threadParticipationSQL +
+	" FROM (SELECT event_id, MAX(id) AS latest, COUNT(*) AS cnt FROM syncapi_relations" +
+	" WHERE room_id = $1 AND rel_type = 'm.thread' GROUP BY event_id HAVING MAX(id) < $3" +
+	" ORDER BY MAX(id) DESC LIMIT $4) t" +
+	" ORDER BY t.latest DESC"
+
+const selectParticipatedThreadsSQL = "" +
+	"SELECT t.event_id, t.latest, t.cnt," +
+	" (SELECT l.child_event_id FROM syncapi_relations l WHERE l.id = t.latest)," +
+	" " + threadParticipationSQL +
+	" FROM (SELECT event_id, MAX(id) AS latest, COUNT(*) AS cnt FROM syncapi_relations" +
+	" WHERE room_id = $1 AND rel_type = 'm.thread' GROUP BY event_id HAVING MAX(id) < $3" +
+	" AND (EXISTS (SELECT 1 FROM syncapi_output_room_events r WHERE r.event_id = syncapi_relations.event_id AND r.sender = $2)" +
+	" OR EXISTS (SELECT 1 FROM syncapi_relations c JOIN syncapi_output_room_events ce ON ce.event_id = c.child_event_id" +
+	" WHERE c.room_id = $1 AND c.event_id = syncapi_relations.event_id AND c.rel_type = 'm.thread' AND ce.sender = $2))" +
+	" ORDER BY MAX(id) DESC LIMIT $4) t" +
+	" ORDER BY t.latest DESC"
+
+func (s *relationsStatements) SelectThreads(
+	ctx context.Context, txn *sql.Tx, roomID, userID string, onlyParticipated bool, before int64, limit int,
+) ([]types.ThreadEntry, error) {
+	stmt := s.selectThreadsStmt
+	if onlyParticipated {
+		stmt = s.selectParticipatedThreadsStmt
+	}
+	rows, err := sqlutil.TxStmt(txn, stmt).QueryContext(ctx, roomID, userID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectThreads: rows.close() failed")
+	var threads []types.ThreadEntry
+	for rows.Next() {
+		var t types.ThreadEntry
+		var latestEvent sql.NullString
+		if err = rows.Scan(&t.RootEventID, &t.LatestRelationID, &t.Count, &latestEvent, &t.Participated); err != nil {
+			return nil, err
+		}
+		t.LatestEventID = latestEvent.String
+		threads = append(threads, t)
+	}
+	return threads, rows.Err()
 }

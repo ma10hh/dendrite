@@ -118,6 +118,8 @@ type DatabaseTransaction interface {
 	GetPresences(ctx context.Context, userID []string) ([]*types.PresenceInternal, error)
 	PresenceAfter(ctx context.Context, after types.StreamPosition, filter synctypes.EventFilter) (map[string]*types.PresenceInternal, error)
 	RelationsFor(ctx context.Context, roomID, eventID, relType, eventType string, from, to types.StreamPosition, backwards bool, limit int) (events []types.StreamEvent, prevBatch, nextBatch string, err error)
+	// Threads returns the threads of a room, the ones with the latest reply first, from before the given relation ID on.
+	Threads(ctx context.Context, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error)
 }
 
 type Database interface {

@@ -239,4 +239,8 @@ type Relations interface {
 	// should be if there are no boundaries supplied (i.e. we want to work backwards but don't have a
 	// "from" or want to work forwards and don't have a "to").
 	SelectMaxRelationID(ctx context.Context, txn *sql.Tx) (id int64, err error)
+	// SelectThreads returns the threads of a room, the ones with the most recent reply first, whose latest reply
+	// has a relation ID below before. If onlyParticipated is set, only threads that the user sent the root or a
+	// reply of are returned.
+	SelectThreads(ctx context.Context, txn *sql.Tx, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error)
 }

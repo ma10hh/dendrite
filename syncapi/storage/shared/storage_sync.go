@@ -771,6 +771,11 @@ func isStatefilterEmpty(filter *synctypes.StateFilter) bool {
 	}
 }
 
+// Threads returns the threads of a room, the ones with the latest reply first. See tables.Relations.SelectThreads.
+func (d *DatabaseTransaction) Threads(ctx context.Context, roomID, userID string, onlyParticipated bool, before int64, limit int) ([]types.ThreadEntry, error) {
+	return d.Relations.SelectThreads(ctx, d.txn, roomID, userID, onlyParticipated, before, limit)
+}
+
 func (d *DatabaseTransaction) RelationsFor(ctx context.Context, roomID, eventID, relType, eventType string, from, to types.StreamPosition, backwards bool, limit int) (
 	events []types.StreamEvent, prevBatch, nextBatch string, err error,
 ) {

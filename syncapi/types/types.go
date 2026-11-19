@@ -713,3 +713,15 @@ type RelationEntry struct {
 	Position StreamPosition
 	EventID  string
 }
+
+// ThreadEntry is a thread of a room: the event the replies are about and what is known of its replies.
+type ThreadEntry struct {
+	RootEventID string
+	// LatestRelationID orders threads by their latest reply, and is what pagination tokens are made of.
+	LatestRelationID int64
+	LatestEventID    string
+	// Count is the number of replies.
+	Count int
+	// Participated is set if the user sent the root or a reply.
+	Participated bool
+}
