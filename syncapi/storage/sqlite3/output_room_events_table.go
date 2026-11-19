@@ -68,9 +68,12 @@ const selectRecentEventsSQL = "" +
 
 // WHEN, ORDER BY and LIMIT are appended by prepareWithFilters
 
+// The unary plus in `+exclude_from_sync` keeps SQLite from choosing the index on that boolean column. Without table
+// statistics (Dendrite never runs ANALYZE) it picks that index, walks the events of all rooms from the newest down and
+// filters by room: for a room without recent events that reads most of the table.
 const selectRecentEventsForSyncSQL = "" +
 	"SELECT event_id, id, headered_event_json, session_id, exclude_from_sync, transaction_id, history_visibility FROM syncapi_output_room_events" +
-	" WHERE room_id = $1 AND id > $2 AND id <= $3 AND exclude_from_sync = FALSE"
+	" WHERE room_id = $1 AND id > $2 AND id <= $3 AND +exclude_from_sync = FALSE"
 
 // WHEN, ORDER BY and LIMIT are appended by prepareWithFilters
 
@@ -695,7 +698,7 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 		query := "SELECT room_id, MAX(id), MAX(CASE WHEN type IN " + sqlutil.QueryVariadic(len(bumpTypes)) + " THEN id END)" +
 			" FROM syncapi_output_room_events" +
 			" WHERE room_id IN " + sqlutil.QueryVariadicOffset(len(chunk), len(bumpTypes)) +
-			" AND exclude_from_sync = FALSE GROUP BY room_id"
+			" AND +exclude_from_sync = FALSE GROUP BY room_id"
 
 		var rows *sql.Rows
 		var err error
