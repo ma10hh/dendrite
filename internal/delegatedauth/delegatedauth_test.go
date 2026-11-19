@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/element-hq/dendrite/setup/config"
 )
@@ -159,5 +161,105 @@ func TestMetadata(t *testing.T) {
 	var parsed map[string]string
 	if err = json.Unmarshal(md, &parsed); err != nil || parsed["token_endpoint"] != f.URL+"/token" {
 		t.Errorf("unexpected metadata %s (%v)", md, err)
+	}
+}
+
+func TestParseScopeSameDeviceUnderBothPrefixes(t *testing.T) {
+	got := parseScope("urn:matrix:client:api:* urn:matrix:client:device:ABC urn:matrix:org.matrix.msc2967.client:device:ABC")
+	if got.DeviceID != "ABC" || !got.HasAPIScope {
+		t.Errorf("got %+v, want device ABC with API scope", got)
+	}
+}
+
+func TestInactiveTokensAreCached(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	p := New(f.config())
+	for i := 0; i < 5; i++ {
+		if tok, err := p.Introspect(context.Background(), "dead"); err != nil || tok != nil {
+			t.Fatalf("got (%v, %v), want (nil, nil)", tok, err)
+		}
+	}
+	if n := f.introspections.Load(); n != 1 {
+		t.Errorf("introspection endpoint called %d times, want 1", n)
+	}
+}
+
+func TestConcurrentIntrospectionsAreCoalesced(t *testing.T) {
+	var calls atomic.Int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-release
+		_, _ = w.Write([]byte(`{"active": true, "username": "alice"}`))
+	}))
+	defer srv.Close()
+	p := New(&config.MSC3861{Enabled: true, Issuer: srv.URL, ClientID: "c", ClientSecret: "s", IntrospectionEndpoint: srv.URL})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if tok, err := p.Introspect(context.Background(), "same"); err != nil || tok == nil {
+				t.Errorf("got (%v, %v)", tok, err)
+			}
+		}()
+	}
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	if n := calls.Load(); n != 1 {
+		t.Errorf("provider called %d times for 20 concurrent lookups, want 1", n)
+	}
+}
+
+func TestMetadataFailuresBackOff(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+	p := New(&config.MSC3861{Enabled: true, Issuer: srv.URL, ClientID: "c", ClientSecret: "s"})
+	for i := 0; i < 5; i++ {
+		if _, err := p.Metadata(context.Background()); err == nil {
+			t.Fatal("expected an error")
+		}
+	}
+	// One attempt tries both well-known locations.
+	if n := calls.Load(); n != 2 {
+		t.Errorf("provider called %d times, want 2 (a single attempt)", n)
+	}
+}
+
+func TestStaleMetadataIsServedWhileProviderIsDown(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	p := New(f.config())
+	if _, err := p.Metadata(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	p.mdMu.Lock()
+	p.metadataFetched = time.Now().Add(-2 * metadataTTL)
+	p.metadataAttempt = time.Now().Add(-2 * metadataTTL)
+	p.mdMu.Unlock()
+
+	start := time.Now()
+	md, err := p.Metadata(context.Background())
+	if err != nil || md == nil {
+		t.Fatalf("got (%s, %v), want the stale metadata", md, err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("serving stale metadata took %v, it must not wait for the provider", d)
+	}
+}
+
+func TestForConfigIsShared(t *testing.T) {
+	cfg := &config.MSC3861{Enabled: true, Issuer: "https://auth.example.com/"}
+	if ForConfig(cfg) != ForConfig(cfg) {
+		t.Error("expected the same provider for the same config")
+	}
+	if ForConfig(cfg) == ForConfig(&config.MSC3861{}) {
+		t.Error("expected different providers for different configs")
 	}
 }

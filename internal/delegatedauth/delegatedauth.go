@@ -17,12 +17,19 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/element-hq/dendrite/setup/config"
 )
 
 const (
-	metadataTTL          = time.Hour
-	introspectionTTL     = time.Minute
+	metadataTTL           = time.Hour
+	metadataRetryInterval = 30 * time.Second
+	introspectionTTL      = time.Minute
+	// Inactive tokens are cached briefly so that a client retrying with a dead
+	// token, or a flood of random tokens, does not become a flood of requests
+	// to the provider.
+	inactiveTokenTTL     = 10 * time.Second
 	maxCacheEntries      = 10000
 	requestTimeout       = 10 * time.Second
 	maxResponseBytes     = 1 << 20
@@ -53,6 +60,7 @@ type introspectionResponse struct {
 	Expiry   int64  `json:"exp"`
 }
 
+// cacheEntry holds the outcome of an introspection. A nil token means "inactive".
 type cacheEntry struct {
 	token   *Token
 	expires time.Time
@@ -66,9 +74,31 @@ type Provider struct {
 	metadata        json.RawMessage
 	introspectionEP string
 	metadataFetched time.Time
+	metadataAttempt time.Time
+	metadataErr     error
+	mdFlight        singleflight.Group
 
-	mu    sync.Mutex
-	cache map[string]cacheEntry
+	mu     sync.Mutex
+	cache  map[string]cacheEntry
+	flight singleflight.Group
+}
+
+var (
+	providersMu sync.Mutex
+	providers   = map[*config.MSC3861]*Provider{}
+)
+
+// ForConfig returns the provider shared by everything using the given config, so that
+// the metadata and token caches exist only once per process.
+func ForConfig(cfg *config.MSC3861) *Provider {
+	providersMu.Lock()
+	defer providersMu.Unlock()
+	p, ok := providers[cfg]
+	if !ok {
+		p = New(cfg)
+		providers[cfg] = p
+	}
+	return p
 }
 
 func New(cfg *config.MSC3861) *Provider {
@@ -90,13 +120,38 @@ func (p *Provider) Metadata(ctx context.Context) (json.RawMessage, error) {
 	return md, err
 }
 
+// loadMetadata returns the cached provider metadata. Stale metadata is served immediately
+// while it is refreshed in the background, and failed refreshes are not retried more
+// often than metadataRetryInterval, so an unreachable provider cannot stall requests.
 func (p *Provider) loadMetadata(ctx context.Context) (json.RawMessage, string, error) {
 	p.mdMu.Lock()
-	defer p.mdMu.Unlock()
-	if p.metadata != nil && time.Since(p.metadataFetched) < metadataTTL {
-		return p.metadata, p.introspectionEP, nil
-	}
+	md, endpoint, lastErr := p.metadata, p.introspectionEP, p.metadataErr
+	fresh := md != nil && time.Since(p.metadataFetched) < metadataTTL
+	backingOff := time.Since(p.metadataAttempt) < metadataRetryInterval
+	p.mdMu.Unlock()
 
+	if fresh {
+		return md, endpoint, nil
+	}
+	detached := context.WithoutCancel(ctx)
+	if md != nil {
+		if !backingOff {
+			p.mdFlight.DoChan("metadata", func() (any, error) { return nil, p.fetchMetadata(detached) })
+		}
+		return md, endpoint, nil
+	}
+	if backingOff && lastErr != nil {
+		return nil, "", lastErr
+	}
+	if _, err, _ := p.mdFlight.Do("metadata", func() (any, error) { return nil, p.fetchMetadata(detached) }); err != nil {
+		return nil, "", err
+	}
+	p.mdMu.Lock()
+	defer p.mdMu.Unlock()
+	return p.metadata, p.introspectionEP, nil
+}
+
+func (p *Provider) fetchMetadata(ctx context.Context) error {
 	issuer := strings.TrimRight(p.cfg.Issuer, "/")
 	var lastErr error
 	for _, suffix := range []string{wellKnownOIDC, wellKnownOAuthServer} {
@@ -117,16 +172,20 @@ func (p *Provider) loadMetadata(ctx context.Context) (json.RawMessage, string, e
 			lastErr = fmt.Errorf("metadata from %s has issuer %q, expected %q", issuer+suffix, parsed.Issuer, p.cfg.Issuer)
 			continue
 		}
+		p.mdMu.Lock()
 		p.metadata = raw
 		p.introspectionEP = parsed.IntrospectionEndpoint
 		p.metadataFetched = time.Now()
-		return p.metadata, p.introspectionEP, nil
+		p.metadataAttempt = p.metadataFetched
+		p.metadataErr = nil
+		p.mdMu.Unlock()
+		return nil
 	}
-	if p.metadata != nil {
-		// Keep serving stale metadata rather than failing every request while the provider is down.
-		return p.metadata, p.introspectionEP, nil
-	}
-	return nil, "", lastErr
+	p.mdMu.Lock()
+	p.metadataAttempt = time.Now()
+	p.metadataErr = lastErr
+	p.mdMu.Unlock()
+	return lastErr
 }
 
 func (p *Provider) get(ctx context.Context, u string) (json.RawMessage, error) {
@@ -151,16 +210,52 @@ func (p *Provider) get(ctx context.Context, u string) (json.RawMessage, error) {
 // not be treated as the token being invalid.
 func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, error) {
 	key := cacheKey(accessToken)
-	p.mu.Lock()
-	if e, ok := p.cache[key]; ok {
-		if time.Now().Before(e.expires) {
-			p.mu.Unlock()
-			return e.token, nil
-		}
-		delete(p.cache, key)
+	if token, ok := p.cached(key); ok {
+		return token, nil
 	}
-	p.mu.Unlock()
+	// Concurrent lookups of the same token share one request to the provider.
+	detached := context.WithoutCancel(ctx)
+	v, err, _ := p.flight.Do(key, func() (any, error) {
+		return p.introspectRemote(detached, accessToken, key)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*Token), nil
+}
 
+func (p *Provider) cached(key string) (*Token, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	e, ok := p.cache[key]
+	if !ok {
+		return nil, false
+	}
+	if time.Now().After(e.expires) {
+		delete(p.cache, key)
+		return nil, false
+	}
+	return e.token, true
+}
+
+func (p *Provider) store(key string, token *Token, expires time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.cache) >= maxCacheEntries {
+		now := time.Now()
+		for k, e := range p.cache {
+			if now.After(e.expires) {
+				delete(p.cache, k)
+			}
+		}
+		if len(p.cache) >= maxCacheEntries {
+			p.cache = map[string]cacheEntry{}
+		}
+	}
+	p.cache[key] = cacheEntry{token: token, expires: expires}
+}
+
+func (p *Provider) introspectRemote(ctx context.Context, accessToken, key string) (*Token, error) {
 	endpoint := p.cfg.IntrospectionEndpoint
 	if endpoint == "" {
 		var err error
@@ -199,6 +294,7 @@ func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, 
 		return nil, fmt.Errorf("invalid token introspection response: %w", err)
 	}
 	if !ir.Active {
+		p.store(key, nil, time.Now().Add(inactiveTokenTTL))
 		return nil, nil
 	}
 
@@ -211,26 +307,13 @@ func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, 
 			expires = exp
 		}
 	}
-	p.mu.Lock()
-	if len(p.cache) >= maxCacheEntries {
-		now := time.Now()
-		for k, e := range p.cache {
-			if now.After(e.expires) {
-				delete(p.cache, k)
-			}
-		}
-		if len(p.cache) >= maxCacheEntries {
-			p.cache = map[string]cacheEntry{}
-		}
-	}
-	p.cache[key] = cacheEntry{token: token, expires: expires}
-	p.mu.Unlock()
+	p.store(key, token, expires)
 	return token, nil
 }
 
 func parseScope(scope string) *Token {
 	t := &Token{}
-	devices := 0
+	devices := map[string]struct{}{}
 	for _, s := range strings.Fields(scope) {
 		for _, prefix := range []string{stableScopePrefix, unstableScopePrefix} {
 			rest, ok := strings.CutPrefix(s, prefix)
@@ -240,12 +323,13 @@ func parseScope(scope string) *Token {
 			if rest == apiScopeSuffix {
 				t.HasAPIScope = true
 			} else if id, ok := strings.CutPrefix(rest, deviceScopeSuffix); ok {
-				devices++
+				devices[id] = struct{}{}
 				t.DeviceID = id
 			}
 		}
 	}
-	if devices != 1 || len(t.DeviceID) > maxDeviceIDLength {
+	// The same device may legitimately be listed under both the stable and unstable prefix.
+	if len(devices) != 1 || len(t.DeviceID) > maxDeviceIDLength {
 		t.DeviceID = ""
 	}
 	return t

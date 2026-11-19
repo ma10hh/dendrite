@@ -147,7 +147,9 @@ func Setup(
 		}),
 	).Methods(http.MethodGet, http.MethodOptions)
 
-	if cfg.RegistrationSharedSecret != "" {
+	if cfg.RegistrationSharedSecret != "" && cfg.MSC3861.Enabled {
+		logrus.Warn("registration_shared_secret is ignored because authentication is delegated (client_api.msc3861)")
+	} else if cfg.RegistrationSharedSecret != "" {
 		logrus.Info("Enabling shared secret registration at /_synapse/admin/v1/register")
 		sr := NewSharedSecretRegistration(cfg.RegistrationSharedSecret)
 		synapseAdminRouter.Handle("/admin/v1/register",
@@ -311,7 +313,7 @@ func Setup(
 	var delegatedAuthProvider *delegatedauth.Provider
 	if cfg.MSC3861.Enabled {
 		logrus.Infof("Authentication is delegated to %s (MSC3861)", cfg.MSC3861.Issuer)
-		delegatedAuthProvider = delegatedauth.New(&cfg.MSC3861)
+		delegatedAuthProvider = delegatedauth.ForConfig(&cfg.MSC3861)
 		v3mux.Use(delegatedAuthMiddleware)
 	}
 	v1mux.Handle("/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)

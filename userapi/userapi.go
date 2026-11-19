@@ -96,7 +96,7 @@ func NewInternalAPI(
 		FedClient:            fedClient,
 	}
 	if dendriteCfg.ClientAPI.MSC3861.Enabled {
-		userAPI.DelegatedAuth = delegatedauth.New(&dendriteCfg.ClientAPI.MSC3861)
+		userAPI.DelegatedAuth = delegatedauth.ForConfig(&dendriteCfg.ClientAPI.MSC3861)
 	}
 
 	updater := internal.NewDeviceListUpdater(processContext, keyDB, userAPI, keyChangeProducer, fedClient, dendriteCfg.UserAPI.WorkerCount, rsAPI, dendriteCfg.Global.ServerName, enableMetrics, blacklistedOrBackingOffFn)
