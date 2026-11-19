@@ -1,6 +1,6 @@
 # Dendrite
 
-[![Build status](https://github.com/element-hq/dendrite/actions/workflows/dendrite.yml/badge.svg?event=push)](https://github.com/element-hq/dendrite/actions/workflows/dendrite.yml) [![Dendrite](https://img.shields.io/matrix/dendrite:matrix.org.svg?label=%23dendrite%3Amatrix.org&logo=matrix&server_fqdn=matrix.org)](https://matrix.to/#/#dendrite:matrix.org) [![Dendrite Dev](https://img.shields.io/matrix/dendrite-dev:matrix.org.svg?label=%23dendrite-dev%3Amatrix.org&logo=matrix&server_fqdn=matrix.org)](https://matrix.to/#/#dendrite-dev:matrix.org)
+[![Build status](https://github.com/ma10hh/dendrite/actions/workflows/dendrite.yml/badge.svg?event=push)](https://github.com/ma10hh/dendrite/actions/workflows/dendrite.yml) [![Dendrite](https://img.shields.io/matrix/dendrite:matrix.org.svg?label=%23dendrite%3Amatrix.org&logo=matrix&server_fqdn=matrix.org)](https://matrix.to/#/#dendrite:matrix.org) [![Dendrite Dev](https://img.shields.io/matrix/dendrite-dev:matrix.org.svg?label=%23dendrite-dev%3Amatrix.org&logo=matrix&server_fqdn=matrix.org)](https://matrix.to/#/#dendrite-dev:matrix.org)
 
 Dendrite is a second-generation Matrix homeserver written in Go. It is currently in maintenance mode,
 meaning only security fixes are being applied, for example [room version 12](https://matrix.org/blog/2025/08/security-release/).
@@ -56,7 +56,7 @@ advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
 To try it:
 
 ```bash
-$ git clone <the URL of this repository>
+$ git clone https://github.com/ma10hh/dendrite
 $ cd dendrite
 # Go 1.25 is what the Dockerfiles use. With Nix, `nix-shell` provides Go and the other tools.
 $ go build -o bin/ ./cmd/dendrite ./cmd/generate-keys ./cmd/create-account
@@ -77,7 +77,7 @@ Things to know:
   `proxy_read_timeout` to 600 seconds.
 - **No database changes.** This fork adds no tables or migrations, and keeps sliding sync sessions in memory, so you can switch between it and
   upstream Dendrite without migrating. After a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle.
-- **Report problems on this fork's issue tracker, not upstream's**, since upstream does not maintain this code. Include the Dendrite
+- **Report problems on [this fork's issue tracker](https://github.com/ma10hh/dendrite/issues), not upstream's**, since upstream does not maintain this code. Include the Dendrite
   log around the time and what Element X showed.
 
 More detail: [what is supported and how it behaves](docs/other/sliding-sync.md), and the
@@ -111,7 +111,7 @@ If you wish to build a fully-federating Dendrite instance, see [the Installation
 The following instructions are enough to get Dendrite started as a non-federating test deployment using self-signed certificates and SQLite databases:
 
 ```bash
-$ git clone <the URL of this repository>
+$ git clone https://github.com/ma10hh/dendrite
 $ cd dendrite
 $ go build -o bin/ ./cmd/...
 
