@@ -167,6 +167,17 @@ app_service_api:
 
 # Configuration for the Client API.
 client_api:
+  # Delegate authentication to an external OAuth 2.0 / OpenID Connect provider such as
+  # Matrix Authentication Service (MSC3861). See docs/administration/7_delegated_auth.md.
+  # msc3861:
+  #   enabled: true
+  #   issuer: https://auth.example.com/
+  #   client_id: dendrite
+  #   client_secret: ""
+  #   client_auth_method: client_secret_basic  # or client_secret_post
+  #   # Overrides the introspection endpoint advertised by the provider:
+  #   # introspection_endpoint: https://auth.example.com/oauth2/introspect
+
   # Prevents new users from being able to register on this homeserver, except when
   # using the registration shared secret below.
   registration_disabled: true

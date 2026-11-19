@@ -29,6 +29,7 @@ import (
 	clientutil "github.com/element-hq/dendrite/clientapi/httputil"
 	"github.com/element-hq/dendrite/clientapi/producers"
 	federationAPI "github.com/element-hq/dendrite/federationapi/api"
+	"github.com/element-hq/dendrite/internal/delegatedauth"
 	"github.com/element-hq/dendrite/internal/httputil"
 	"github.com/element-hq/dendrite/internal/transactions"
 	roomserverAPI "github.com/element-hq/dendrite/roomserver/api"
@@ -44,9 +45,14 @@ type WellKnownSlidingSyncProxy struct {
 	Url string `json:"url"`
 }
 
+type WellKnownAuthentication struct {
+	Issuer string `json:"issuer"`
+}
+
 type WellKnownClientResponse struct {
 	Homeserver       WellKnownClientHomeserver  `json:"m.homeserver"`
 	SlidingSyncProxy *WellKnownSlidingSyncProxy `json:"org.matrix.msc3575.proxy,omitempty"`
+	Authentication   *WellKnownAuthentication   `json:"org.matrix.msc2965.authentication,omitempty"`
 }
 
 // Setup registers HTTP handlers with the given ServeMux. It also supplies the given http.Client
@@ -108,6 +114,9 @@ func Setup(
 				}
 			}
 
+			if cfg.MSC3861.Enabled {
+				response.Authentication = &WellKnownAuthentication{Issuer: cfg.MSC3861.Issuer}
+			}
 			return util.JSONResponse{
 				Code: http.StatusOK,
 				JSON: response,
@@ -298,6 +307,16 @@ func Setup(
 	v1mux := publicAPIMux.PathPrefix("/v1/").Subrouter()
 
 	unstableMux := publicAPIMux.PathPrefix("/unstable").Subrouter()
+
+	var delegatedAuthProvider *delegatedauth.Provider
+	if cfg.MSC3861.Enabled {
+		logrus.Infof("Authentication is delegated to %s (MSC3861)", cfg.MSC3861.Issuer)
+		delegatedAuthProvider = delegatedauth.New(&cfg.MSC3861)
+		v3mux.Use(delegatedAuthMiddleware)
+	}
+	v1mux.Handle("/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
+	unstableMux.Handle("/org.matrix.msc2965/auth_metadata", authMetadata(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
+	unstableMux.Handle("/org.matrix.msc2965/auth_issuer", authIssuer(delegatedAuthProvider)).Methods(http.MethodGet, http.MethodOptions)
 
 	v3mux.Handle("/createRoom",
 		httputil.MakeAuthAPI("createRoom", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
@@ -1263,7 +1282,7 @@ func Setup(
 			if r := rateLimits.Limit(req, device); r != nil {
 				return *r
 			}
-			return GetCapabilities(rsAPI)
+			return GetCapabilities(rsAPI, cfg.MSC3861.Enabled)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodGet, http.MethodOptions)
 

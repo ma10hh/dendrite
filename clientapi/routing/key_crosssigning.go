@@ -71,6 +71,12 @@ func UploadCrossSigningDeviceKeys(
 	}
 
 	if requireUIA {
+		if cfg.MSC3861.Enabled {
+			return util.JSONResponse{
+				Code: http.StatusForbidden,
+				JSON: spec.Forbidden("Replacing cross-signing keys requires re-authentication, which is not available while authentication is delegated to an external provider"),
+			}
+		}
 		sessionID := uploadReq.Auth.Session
 		if sessionID == "" {
 			sessionID = util.RandomString(sessionIDLength)

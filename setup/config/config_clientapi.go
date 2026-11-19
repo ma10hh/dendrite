@@ -55,6 +55,9 @@ type ClientAPI struct {
 	// Rate-limiting options
 	RateLimiting RateLimiting `yaml:"rate_limiting"`
 
+	// Delegate authentication to an external OAuth 2.0 / OpenID Connect provider (MSC3861).
+	MSC3861 MSC3861 `yaml:"msc3861"`
+
 	MSCs *MSCs `yaml:"-"`
 }
 
@@ -74,6 +77,7 @@ func (c *ClientAPI) Defaults(opts DefaultOpts) {
 func (c *ClientAPI) Verify(configErrs *ConfigErrors) {
 	c.TURN.Verify(configErrs)
 	c.RateLimiting.Verify(configErrs)
+	c.MSC3861.Verify(configErrs)
 	if c.RecaptchaEnabled {
 		if c.RecaptchaSiteVerifyAPI == "" {
 			c.RecaptchaSiteVerifyAPI = "https://www.google.com/recaptcha/api/siteverify"

@@ -11,6 +11,7 @@ import (
 
 	fedsenderapi "github.com/element-hq/dendrite/federationapi/api"
 	"github.com/element-hq/dendrite/federationapi/statistics"
+	"github.com/element-hq/dendrite/internal/delegatedauth"
 	"github.com/element-hq/dendrite/internal/pushgateway"
 	"github.com/element-hq/dendrite/internal/sqlutil"
 	"github.com/element-hq/dendrite/setup/config"
@@ -93,6 +94,9 @@ func NewInternalAPI(
 		DisableTLSValidation: dendriteCfg.UserAPI.PushGatewayDisableTLSValidation,
 		PgClient:             pgClient,
 		FedClient:            fedClient,
+	}
+	if dendriteCfg.ClientAPI.MSC3861.Enabled {
+		userAPI.DelegatedAuth = delegatedauth.New(&dendriteCfg.ClientAPI.MSC3861)
 	}
 
 	updater := internal.NewDeviceListUpdater(processContext, keyDB, userAPI, keyChangeProducer, fedClient, dendriteCfg.UserAPI.WorkerCount, rsAPI, dendriteCfg.Global.ServerName, enableMetrics, blacklistedOrBackingOffFn)

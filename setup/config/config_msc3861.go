@@ -1,0 +1,46 @@
+package config
+
+import "strings"
+
+const (
+	ClientAuthMethodBasic = "client_secret_basic"
+	ClientAuthMethodPost  = "client_secret_post"
+)
+
+// MSC3861 configures delegation of authentication to an external OAuth 2.0 / OpenID
+// Connect provider, as described in MSC3861. Dendrite then acts purely as a resource
+// server: it validates the access tokens issued by the provider through token
+// introspection (RFC 7662) and no longer handles logins, registrations or password changes itself.
+type MSC3861 struct {
+	Enabled bool `yaml:"enabled"`
+
+	// The issuer identifier of the provider, e.g. https://account.example.com/
+	Issuer string `yaml:"issuer"`
+
+	// The credentials Dendrite uses to authenticate itself at the introspection endpoint.
+	ClientID     string `yaml:"client_id"`
+	ClientSecret string `yaml:"client_secret"`
+	// client_secret_basic (default) or client_secret_post.
+	ClientAuthMethod string `yaml:"client_auth_method"`
+
+	// Optional. Overrides the introspection endpoint advertised in the provider's metadata.
+	IntrospectionEndpoint string `yaml:"introspection_endpoint"`
+}
+
+func (c *MSC3861) Verify(configErrs *ConfigErrors) {
+	if !c.Enabled {
+		return
+	}
+	checkNotEmpty(configErrs, "client_api.msc3861.issuer", c.Issuer)
+	checkNotEmpty(configErrs, "client_api.msc3861.client_id", c.ClientID)
+	checkNotEmpty(configErrs, "client_api.msc3861.client_secret", c.ClientSecret)
+	switch c.ClientAuthMethod {
+	case "", ClientAuthMethodBasic, ClientAuthMethodPost:
+	default:
+		configErrs.Add("config key 'client_api.msc3861.client_auth_method' must be one of '" +
+			ClientAuthMethodBasic + "' or '" + ClientAuthMethodPost + "'")
+	}
+	if c.Issuer != "" && !strings.HasPrefix(c.Issuer, "https://") && !strings.HasPrefix(c.Issuer, "http://") {
+		configErrs.Add("config key 'client_api.msc3861.issuer' must be an http(s) URL")
+	}
+}

@@ -1,0 +1,109 @@
+package userapi_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/element-hq/dendrite/internal/delegatedauth"
+	"github.com/element-hq/dendrite/setup/config"
+	"github.com/element-hq/dendrite/test"
+	"github.com/element-hq/dendrite/userapi/api"
+	"github.com/element-hq/dendrite/userapi/internal"
+)
+
+func TestQueryAccessTokenDelegated(t *testing.T) {
+	tokens := map[string]string{
+		"good":      `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1"}`,
+		"nodevice":  `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:*"}`,
+		"noapi":     `{"active": true, "username": "alice", "scope": "urn:matrix:client:device:DEVICE1"}`,
+		"badname":   `{"active": true, "username": "Al ice", "scope": "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1"}`,
+		"otherdev":  `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:* urn:matrix:client:device:DEVICE2"}`,
+		"remote":    `{"active": true, "username": "@bob:elsewhere.org", "scope": "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1"}`,
+		"inactive":  `{"active": false}`,
+		"qualified": `{"active": true, "username": "@carol:example.com", "scope": "urn:matrix:client:api:* urn:matrix:client:device:DEVICE1"}`,
+	}
+	op := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		if resp, ok := tokens[r.PostForm.Get("token")]; ok {
+			_, _ = w.Write([]byte(resp))
+			return
+		}
+		_, _ = w.Write([]byte(`{"active": false}`))
+	}))
+	t.Cleanup(op.Close)
+
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		userAPI, accountDB, close := MustMakeInternalAPI(t, apiTestOpts{}, dbType, nil)
+		defer close()
+		internalAPI := userAPI.(*internal.UserInternalAPI)
+		internalAPI.DelegatedAuth = delegatedauth.New(&config.MSC3861{
+			Enabled: true, Issuer: op.URL, ClientID: "dendrite", ClientSecret: "secret", IntrospectionEndpoint: op.URL,
+		})
+		ctx := context.Background()
+
+		query := func(token string) api.QueryAccessTokenResponse {
+			t.Helper()
+			var res api.QueryAccessTokenResponse
+			if err := userAPI.QueryAccessToken(ctx, &api.QueryAccessTokenRequest{AccessToken: token}, &res); err != nil {
+				t.Fatalf("QueryAccessToken(%q): %v", token, err)
+			}
+			return res
+		}
+
+		// The first use of a token provisions the account and the device.
+		res := query("good")
+		if res.Device == nil || res.Device.UserID != "@alice:example.com" || res.Device.ID != "DEVICE1" {
+			t.Fatalf("unexpected device %+v (err %q)", res.Device, res.Err)
+		}
+		if _, err := accountDB.GetAccountByLocalpart(ctx, "alice", serverName); err != nil {
+			t.Errorf("account was not created: %v", err)
+		}
+		firstSession := res.Device.SessionID
+
+		// Later uses must not recreate the device, as that would revoke it.
+		res = query("good")
+		if res.Device == nil || res.Device.SessionID != firstSession || firstSession == 0 {
+			t.Errorf("device was recreated: %+v", res.Device)
+		}
+
+		// A different device ID creates a second device for the same account.
+		if res = query("otherdev"); res.Device == nil || res.Device.ID != "DEVICE2" {
+			t.Errorf("unexpected device %+v", res.Device)
+		}
+		devices, err := accountDB.GetDevicesByLocalpart(ctx, "alice", serverName)
+		if err != nil || len(devices) != 2 {
+			t.Errorf("got %d devices (%v), want 2", len(devices), err)
+		}
+
+		if res = query("qualified"); res.Device == nil || res.Device.UserID != "@carol:example.com" {
+			t.Errorf("fully qualified usernames should work: %+v", res.Device)
+		}
+
+		for _, token := range []string{"nodevice", "noapi"} {
+			if res = query(token); res.Device != nil || res.Err == "" {
+				t.Errorf("%s: got device %+v err %q, want a forbidden error", token, res.Device, res.Err)
+			}
+		}
+		for _, token := range []string{"inactive", "unknown"} {
+			if res = query(token); res.Device != nil || res.Err != "" {
+				t.Errorf("%s: got device %+v err %q, want an unknown token", token, res.Device, res.Err)
+			}
+		}
+		for _, token := range []string{"badname", "remote"} {
+			var r api.QueryAccessTokenResponse
+			if err = userAPI.QueryAccessToken(ctx, &api.QueryAccessTokenRequest{AccessToken: token}, &r); err == nil {
+				t.Errorf("%s: expected an error", token)
+			}
+		}
+
+		// Tokens in the database are not accepted while authentication is delegated.
+		if _, err = accountDB.CreateDevice(ctx, "alice", serverName, nil, "legacytoken", nil, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if res = query("legacytoken"); res.Device != nil {
+			t.Errorf("legacy token accepted: %+v", res.Device)
+		}
+	})
+}

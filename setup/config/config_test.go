@@ -314,3 +314,32 @@ func Test_SigningIdentityFor(t *testing.T) {
 		})
 	}
 }
+
+func TestMSC3861Verify(t *testing.T) {
+	valid := MSC3861{Enabled: true, Issuer: "https://auth.example.com/", ClientID: "dendrite", ClientSecret: "secret"}
+	tests := []struct {
+		name    string
+		mutate  func(*MSC3861)
+		wantErr bool
+	}{
+		{"disabled needs nothing", func(c *MSC3861) { *c = MSC3861{} }, false},
+		{"valid", func(c *MSC3861) {}, false},
+		{"missing issuer", func(c *MSC3861) { c.Issuer = "" }, true},
+		{"missing client id", func(c *MSC3861) { c.ClientID = "" }, true},
+		{"missing client secret", func(c *MSC3861) { c.ClientSecret = "" }, true},
+		{"issuer not a URL", func(c *MSC3861) { c.Issuer = "auth.example.com" }, true},
+		{"unknown auth method", func(c *MSC3861) { c.ClientAuthMethod = "private_key_jwt" }, true},
+		{"post auth method", func(c *MSC3861) { c.ClientAuthMethod = ClientAuthMethodPost }, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			c := valid
+			tc.mutate(&c)
+			var errs ConfigErrors
+			c.Verify(&errs)
+			if (len(errs) > 0) != tc.wantErr {
+				t.Errorf("Verify() errors = %v, wantErr %v", errs, tc.wantErr)
+			}
+		})
+	}
+}

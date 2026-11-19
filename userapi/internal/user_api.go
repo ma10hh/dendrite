@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 	"time"
 
 	appserviceAPI "github.com/element-hq/dendrite/appservice/api"
@@ -27,6 +28,7 @@ import (
 
 	clientapi "github.com/element-hq/dendrite/clientapi/api"
 	"github.com/element-hq/dendrite/clientapi/userutil"
+	"github.com/element-hq/dendrite/internal/delegatedauth"
 	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/internal/pushgateway"
 	"github.com/element-hq/dendrite/internal/sqlutil"
@@ -54,6 +56,10 @@ type UserInternalAPI struct {
 	PgClient    pushgateway.Client
 	FedClient   fedsenderapi.KeyserverFederationAPI
 	Updater     *DeviceListUpdater
+
+	// DelegatedAuth is set when authentication is delegated to an external provider (MSC3861).
+	DelegatedAuth   *delegatedauth.Provider
+	delegatedAuthMu sync.Mutex
 }
 
 func (a *UserInternalAPI) PerformAdminCreateRegistrationToken(ctx context.Context, registrationToken *clientapi.RegistrationToken) (bool, error) {
@@ -565,6 +571,9 @@ func (a *UserInternalAPI) QueryAccessToken(ctx context.Context, req *api.QueryAc
 			return nil
 		}
 		// If the provided token wasn't an as_token (both err and appServiceDevice are nil), continue with normal auth.
+	}
+	if a.DelegatedAuth != nil {
+		return a.queryDelegatedAuthToken(ctx, req.AccessToken, res)
 	}
 	device, err := a.DB.GetDeviceByAccessToken(ctx, req.AccessToken)
 	if err != nil {

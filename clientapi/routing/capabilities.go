@@ -17,7 +17,7 @@ import (
 
 // GetCapabilities returns information about the server's supported feature set
 // and other relevant capabilities to an authenticated user.
-func GetCapabilities(rsAPI roomserverAPI.ClientRoomserverAPI) util.JSONResponse {
+func GetCapabilities(rsAPI roomserverAPI.ClientRoomserverAPI, delegatedAuth bool) util.JSONResponse {
 	versionsMap := map[gomatrixserverlib.RoomVersion]string{}
 	for v, desc := range version.SupportedRoomVersions() {
 		if desc.Stable() {
@@ -30,13 +30,17 @@ func GetCapabilities(rsAPI roomserverAPI.ClientRoomserverAPI) util.JSONResponse 
 	response := map[string]interface{}{
 		"capabilities": map[string]interface{}{
 			"m.change_password": map[string]bool{
-				"enabled": true,
+				"enabled": !delegatedAuth,
 			},
 			"m.room_versions": map[string]interface{}{
 				"default":   rsAPI.DefaultRoomVersion(),
 				"available": versionsMap,
 			},
 		},
+	}
+
+	if delegatedAuth {
+		response["capabilities"].(map[string]interface{})["m.3pid_changes"] = map[string]bool{"enabled": false}
 	}
 
 	return util.JSONResponse{
