@@ -107,6 +107,11 @@ func (s *syncUserAPI) QueryAccessToken(ctx context.Context, req *userapi.QueryAc
 	return nil
 }
 
+func (s *syncUserAPI) QueryAccountData(ctx context.Context, req *userapi.QueryAccountDataRequest, res *userapi.QueryAccountDataResponse) error {
+	res.GlobalAccountData = map[string]json.RawMessage{}
+	return nil
+}
+
 func (s *syncUserAPI) QueryKeyChanges(ctx context.Context, req *userapi.QueryKeyChangesRequest, res *userapi.QueryKeyChangesResponse) error {
 	return nil
 }

@@ -26,6 +26,7 @@ import (
 	"github.com/element-hq/dendrite/syncapi/notifier"
 	"github.com/element-hq/dendrite/syncapi/producers"
 	"github.com/element-hq/dendrite/syncapi/routing"
+	"github.com/element-hq/dendrite/syncapi/slidingsync"
 	"github.com/element-hq/dendrite/syncapi/storage"
 	"github.com/element-hq/dendrite/syncapi/streams"
 	"github.com/element-hq/dendrite/syncapi/sync"
@@ -149,5 +150,10 @@ func AddPublicRoutes(
 		routers.Client, requestPool, syncDB, userAPI,
 		rsAPI, &dendriteCfg.SyncAPI, caches, fts,
 		rateLimits,
+		slidingsync.NewHandler(
+			slidingsync.NewConnectionStore(slidingsync.DefaultConnectionTTL, slidingsync.DefaultMaxConnectionsPerDevice),
+			syncDB, userAPI, rsAPI, notifier, eduCache, &dendriteCfg.SyncAPI,
+			processContext.Context(), enableMetrics,
+		),
 	)
 }
