@@ -1,0 +1,41 @@
+# Dendrite behind Matrix Authentication Service, for the checks in test.sh. See README.md.
+name: dendrite-lab
+services:
+  postgres:
+    image: postgres:16.4-alpine
+    environment:
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - ./initdb.sql:/docker-entrypoint-initdb.d/initdb.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      retries: 30
+  mas-migrate:
+    image: ghcr.io/element-hq/matrix-authentication-service:1.29.0
+    command: ["database", "migrate", "--config", "/config.yaml"]
+    volumes:
+      - ./generated/mas.yaml:/config.yaml:ro
+    depends_on:
+      postgres: {condition: service_healthy}
+  mas:
+    image: ghcr.io/element-hq/matrix-authentication-service:1.29.0
+    command: ["server", "--config", "/config.yaml"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./generated/mas.yaml:/config.yaml:ro
+    depends_on:
+      mas-migrate: {condition: service_completed_successfully}
+  dendrite:
+    image: ${DENDRITE_IMAGE:-dendrite-lab:local}
+    command: ["--config", "/etc/dendrite/dendrite.yaml", "--http-bind-address", "0.0.0.0:8008"]
+    ports:
+      - "127.0.0.1:8008:8008"
+    volumes:
+      - ./generated/dendrite:/etc/dendrite
+      - dendrite-data:/var/dendrite
+    depends_on:
+      postgres: {condition: service_healthy}
+volumes:
+  dendrite-data:

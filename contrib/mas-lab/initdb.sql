@@ -1,0 +1,4 @@
+CREATE USER dendrite WITH PASSWORD 'dendrite';
+CREATE DATABASE dendrite OWNER dendrite;
+CREATE USER mas WITH PASSWORD 'mas';
+CREATE DATABASE mas OWNER mas;
