@@ -327,6 +327,7 @@ func TestMSC3861Verify(t *testing.T) {
 		{"missing issuer", func(c *MSC3861) { c.Issuer = "" }, true},
 		{"missing client id", func(c *MSC3861) { c.ClientID = "" }, true},
 		{"missing client secret", func(c *MSC3861) { c.ClientSecret = "" }, true},
+		{"shared secret needs no client credentials", func(c *MSC3861) { c.ClientID, c.ClientSecret, c.SharedSecret = "", "", "s3cret" }, false},
 		{"issuer not a URL", func(c *MSC3861) { c.Issuer = "auth.example.com" }, true},
 		{"unknown auth method", func(c *MSC3861) { c.ClientAuthMethod = "private_key_jwt" }, true},
 		{"post auth method", func(c *MSC3861) { c.ClientAuthMethod = ClientAuthMethodPost }, false},

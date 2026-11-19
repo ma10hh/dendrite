@@ -18,6 +18,7 @@ type fakeProvider struct {
 	introspections atomic.Int32
 	response       string
 	gotAuth        string
+	gotMAS         string
 	gotForm        map[string]string
 }
 
@@ -35,6 +36,7 @@ func newFakeProvider(t *testing.T, wellKnown string) *fakeProvider {
 		f.introspections.Add(1)
 		_ = r.ParseForm()
 		f.gotAuth = r.Header.Get("Authorization")
+		f.gotMAS = r.Header.Get("X-MAS-Supports-Device-Id")
 		f.gotForm = map[string]string{}
 		for k := range r.PostForm {
 			f.gotForm[k] = r.PostForm.Get(k)
@@ -261,5 +263,42 @@ func TestForConfigIsShared(t *testing.T) {
 	}
 	if ForConfig(cfg) == ForConfig(&config.MSC3861{}) {
 		t.Error("expected different providers for different configs")
+	}
+}
+
+func TestIntrospectMASMode(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	f.response = `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:* urn:synapse:admin:*", "device_id": "COMPAT1"}`
+	p := New(&config.MSC3861{Enabled: true, Issuer: f.URL + "/", SharedSecret: "shared"})
+	tok, err := p.Introspect(context.Background(), "tok")
+	if err != nil || tok == nil {
+		t.Fatalf("got (%v, %v)", tok, err)
+	}
+	if f.gotAuth != "Bearer shared" || f.gotMAS != "1" {
+		t.Errorf("auth %q, X-MAS-Supports-Device-Id %q, want the shared secret as bearer token and the header", f.gotAuth, f.gotMAS)
+	}
+	if _, ok := f.gotForm["client_secret"]; ok {
+		t.Error("client credentials must not be sent in MAS mode")
+	}
+	if tok.DeviceID != "COMPAT1" || !tok.IsAdmin || !tok.HasAPIScope {
+		t.Errorf("unexpected token %+v", tok)
+	}
+	if !p.MASMode() {
+		t.Error("expected MAS mode")
+	}
+}
+
+func TestInvalidate(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	f.response = `{"active": true, "username": "alice"}`
+	p := New(f.config())
+	for i := 0; i < 2; i++ {
+		if _, err := p.Introspect(context.Background(), "tok"); err != nil {
+			t.Fatal(err)
+		}
+		p.Invalidate("tok")
+	}
+	if n := f.introspections.Load(); n != 2 {
+		t.Errorf("introspection endpoint called %d times, want 2 after invalidating", n)
 	}
 }

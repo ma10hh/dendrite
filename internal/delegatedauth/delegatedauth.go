@@ -36,6 +36,7 @@ const (
 	stableScopePrefix    = "urn:matrix:client:"
 	unstableScopePrefix  = "urn:matrix:org.matrix.msc2967.client:"
 	apiScopeSuffix       = "api:*"
+	adminScope           = "urn:synapse:admin:*"
 	deviceScopeSuffix    = "device:"
 	maxDeviceIDLength    = 255
 	wellKnownOIDC        = "/.well-known/openid-configuration"
@@ -51,6 +52,8 @@ type Token struct {
 	DeviceID string
 	// HasAPIScope is true if the token grants full client-server API access.
 	HasAPIScope bool
+	// IsAdmin is true if the token carries the urn:synapse:admin:* scope used by MAS for server admins.
+	IsAdmin bool
 }
 
 type introspectionResponse struct {
@@ -58,6 +61,8 @@ type introspectionResponse struct {
 	Scope    string `json:"scope"`
 	Username string `json:"username"`
 	Expiry   int64  `json:"exp"`
+	// MAS sends the device ID explicitly for compatibility sessions, which have no device scope.
+	DeviceID string `json:"device_id"`
 }
 
 // cacheEntry holds the outcome of an introspection. A nil token means "inactive".
@@ -107,6 +112,11 @@ func New(cfg *config.MSC3861) *Provider {
 		client: &http.Client{Timeout: requestTimeout},
 		cache:  map[string]cacheEntry{},
 	}
+}
+
+// MASMode is true if the provider is Matrix Authentication Service, which manages accounts and devices itself.
+func (p *Provider) MASMode() bool {
+	return p.cfg.MASMode()
 }
 
 // Issuer returns the configured issuer identifier.
@@ -224,6 +234,13 @@ func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, 
 	return v.(*Token), nil
 }
 
+// Invalidate forgets what is known about a token, for example because its device was deleted.
+func (p *Provider) Invalidate(accessToken string) {
+	p.mu.Lock()
+	delete(p.cache, cacheKey(accessToken))
+	p.mu.Unlock()
+}
+
 func (p *Provider) cached(key string) (*Token, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -268,7 +285,7 @@ func (p *Provider) introspectRemote(ctx context.Context, accessToken, key string
 	}
 
 	form := url.Values{"token": {accessToken}, "token_type_hint": {"access_token"}}
-	if p.cfg.ClientAuthMethod == config.ClientAuthMethodPost {
+	if p.cfg.SharedSecret == "" && p.cfg.ClientAuthMethod == config.ClientAuthMethodPost {
 		form.Set("client_id", p.cfg.ClientID)
 		form.Set("client_secret", p.cfg.ClientSecret)
 	}
@@ -278,7 +295,11 @@ func (p *Provider) introspectRemote(ctx context.Context, accessToken, key string
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
-	if p.cfg.ClientAuthMethod != config.ClientAuthMethodPost {
+	switch {
+	case p.cfg.SharedSecret != "":
+		req.Header.Set("Authorization", "Bearer "+p.cfg.SharedSecret)
+		req.Header.Set("X-MAS-Supports-Device-Id", "1")
+	case p.cfg.ClientAuthMethod != config.ClientAuthMethodPost:
 		req.SetBasicAuth(url.QueryEscape(p.cfg.ClientID), url.QueryEscape(p.cfg.ClientSecret))
 	}
 	resp, err := p.client.Do(req)
@@ -300,6 +321,12 @@ func (p *Provider) introspectRemote(ctx context.Context, accessToken, key string
 
 	token := parseScope(ir.Scope)
 	token.Username = ir.Username
+	if ir.DeviceID != "" {
+		token.DeviceID = ir.DeviceID
+		if len(ir.DeviceID) > maxDeviceIDLength {
+			token.DeviceID = ""
+		}
+	}
 
 	expires := time.Now().Add(introspectionTTL)
 	if ir.Expiry > 0 {
@@ -326,6 +353,9 @@ func parseScope(scope string) *Token {
 				devices[id] = struct{}{}
 				t.DeviceID = id
 			}
+		}
+		if s == adminScope {
+			t.IsAdmin = true
 		}
 	}
 	// The same device may legitimately be listed under both the stable and unstable prefix.
