@@ -424,6 +424,13 @@ func (d *Database) DeactivateAccount(ctx context.Context, localpart string, serv
 	})
 }
 
+// ReactivateAccount undoes DeactivateAccount. Devices and room memberships removed by the deactivation are not restored.
+func (d *Database) ReactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error) {
+	return d.Writer.Do(nil, nil, func(txn *sql.Tx) error {
+		return d.Accounts.ReactivateAccount(ctx, localpart, serverName)
+	})
+}
+
 // CreateOpenIDToken persists a new token that was issued for OpenID Connect
 func (d *Database) CreateOpenIDToken(
 	ctx context.Context,

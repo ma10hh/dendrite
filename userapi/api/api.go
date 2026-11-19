@@ -31,7 +31,6 @@ type UserInternalAPI interface {
 	FederationUserAPI
 
 	QuerySearchProfilesAPI // used by p2p demos
-	QueryAccountByLocalpart(ctx context.Context, req *QueryAccountByLocalpartRequest, res *QueryAccountByLocalpartResponse) (err error)
 }
 
 // api functions required by the appservice api
@@ -101,6 +100,8 @@ type ClientUserAPI interface {
 	PerformPusherSet(ctx context.Context, req *PerformPusherSetRequest, res *struct{}) error
 	PerformPushRulesPut(ctx context.Context, userID string, ruleSets *pushrules.AccountRuleSets) error
 	PerformAccountDeactivation(ctx context.Context, req *PerformAccountDeactivationRequest, res *PerformAccountDeactivationResponse) error
+	PerformAccountReactivation(ctx context.Context, req *PerformAccountReactivationRequest, res *PerformAccountReactivationResponse) error
+	QueryAccountByLocalpart(ctx context.Context, req *QueryAccountByLocalpartRequest, res *QueryAccountByLocalpartResponse) (err error)
 	PerformOpenIDTokenCreation(ctx context.Context, req *PerformOpenIDTokenCreationRequest, res *PerformOpenIDTokenCreationResponse) error
 	QueryNotifications(ctx context.Context, req *QueryNotificationsRequest, res *QueryNotificationsResponse) error
 	InputAccountData(ctx context.Context, req *InputAccountDataRequest, res *InputAccountDataResponse) error
@@ -392,6 +393,17 @@ type PerformAccountDeactivationRequest struct {
 // PerformAccountDeactivationResponse is the response for PerformAccountDeactivation
 type PerformAccountDeactivationResponse struct {
 	AccountDeactivated bool
+}
+
+// PerformAccountReactivationRequest is the request for PerformAccountReactivation
+type PerformAccountReactivationRequest struct {
+	Localpart  string
+	ServerName spec.ServerName // optional: if blank, default server name used
+}
+
+// PerformAccountReactivationResponse is the response for PerformAccountReactivation
+type PerformAccountReactivationResponse struct {
+	AccountReactivated bool
 }
 
 // PerformOpenIDTokenCreationRequest is the request for PerformOpenIDTokenCreation

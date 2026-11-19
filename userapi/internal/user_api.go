@@ -687,6 +687,20 @@ func (a *UserInternalAPI) PerformAccountDeactivation(ctx context.Context, req *a
 	return err
 }
 
+// PerformAccountReactivation lets a deactivated account be used again. Its devices and room memberships are gone.
+func (a *UserInternalAPI) PerformAccountReactivation(ctx context.Context, req *api.PerformAccountReactivationRequest, res *api.PerformAccountReactivationResponse) error {
+	serverName := req.ServerName
+	if serverName == "" {
+		serverName = a.Config.Matrix.ServerName
+	}
+	if !a.Config.Matrix.IsLocalServerName(serverName) {
+		return fmt.Errorf("server name %q not locally configured", serverName)
+	}
+	err := a.DB.ReactivateAccount(ctx, req.Localpart, serverName)
+	res.AccountReactivated = err == nil
+	return err
+}
+
 // PerformOpenIDTokenCreation creates a new token that a relying party uses to authenticate a user
 func (a *UserInternalAPI) PerformOpenIDTokenCreation(ctx context.Context, req *api.PerformOpenIDTokenCreationRequest, res *api.PerformOpenIDTokenCreationResponse) error {
 	token := util.RandomString(24)
