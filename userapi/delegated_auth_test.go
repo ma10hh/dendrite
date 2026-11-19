@@ -91,11 +91,19 @@ func TestQueryAccessTokenDelegated(t *testing.T) {
 				t.Errorf("%s: got device %+v err %q, want an unknown token", token, res.Device, res.Err)
 			}
 		}
+		// Tokens for users this server cannot represent are the token's fault, not a server error.
 		for _, token := range []string{"badname", "remote"} {
-			var r api.QueryAccessTokenResponse
-			if err = userAPI.QueryAccessToken(ctx, &api.QueryAccessTokenRequest{AccessToken: token}, &r); err == nil {
-				t.Errorf("%s: expected an error", token)
+			if res = query(token); res.Device != nil || res.Err == "" {
+				t.Errorf("%s: got device %+v err %q, want a forbidden error", token, res.Device, res.Err)
 			}
+		}
+
+		// Deactivated accounts must not be revived by a still-active provider token.
+		if err = accountDB.DeactivateAccount(ctx, "alice", serverName); err != nil {
+			t.Fatalf("DeactivateAccount: %v", err)
+		}
+		if res = query("good"); res.Device != nil || res.Err == "" {
+			t.Errorf("deactivated account: got device %+v err %q, want a forbidden error", res.Device, res.Err)
 		}
 
 		// Tokens in the database are not accepted while authentication is delegated.

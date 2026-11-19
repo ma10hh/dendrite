@@ -455,6 +455,8 @@ type Account struct {
 	ServerName   spec.ServerName
 	AppServiceID string
 	AccountType  AccountType
+	// Deactivated is set for accounts that were deactivated and must no longer be usable.
+	Deactivated bool
 	// TODO: Associations (e.g. with application services)
 }
 

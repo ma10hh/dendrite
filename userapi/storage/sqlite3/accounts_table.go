@@ -54,7 +54,7 @@ const deactivateAccountSQL = "" +
 	"UPDATE userapi_accounts SET is_deactivated = 1 WHERE localpart = $1 AND server_name = $2"
 
 const selectAccountByLocalpartSQL = "" +
-	"SELECT localpart, server_name, appservice_id, account_type FROM userapi_accounts WHERE localpart = $1 AND server_name = $2"
+	"SELECT localpart, server_name, appservice_id, account_type, is_deactivated FROM userapi_accounts WHERE localpart = $1 AND server_name = $2"
 
 const selectPasswordHashSQL = "" +
 	"SELECT password_hash FROM userapi_accounts WHERE localpart = $1 AND server_name = $2 AND is_deactivated = 0"
@@ -164,10 +164,11 @@ func (s *accountsStatements) SelectAccountByLocalpart(
 	ctx context.Context, localpart string, serverName spec.ServerName,
 ) (*api.Account, error) {
 	var appserviceIDPtr sql.NullString
+	var deactivated sql.NullBool
 	var acc api.Account
 
 	stmt := s.selectAccountByLocalpartStmt
-	err := stmt.QueryRowContext(ctx, localpart, serverName).Scan(&acc.Localpart, &acc.ServerName, &appserviceIDPtr, &acc.AccountType)
+	err := stmt.QueryRowContext(ctx, localpart, serverName).Scan(&acc.Localpart, &acc.ServerName, &appserviceIDPtr, &acc.AccountType, &deactivated)
 	if err != nil {
 		if err != sql.ErrNoRows {
 			log.WithError(err).Error("Unable to retrieve user from the db")
@@ -177,6 +178,7 @@ func (s *accountsStatements) SelectAccountByLocalpart(
 	if appserviceIDPtr.Valid {
 		acc.AppServiceID = appserviceIDPtr.String
 	}
+	acc.Deactivated = deactivated.Valid && deactivated.Bool
 
 	acc.UserID = userutil.MakeUserID(acc.Localpart, acc.ServerName)
 	return &acc, nil

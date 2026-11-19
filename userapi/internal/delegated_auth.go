@@ -6,8 +6,9 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"regexp"
+
+	"github.com/matrix-org/util"
 
 	"github.com/element-hq/dendrite/clientapi/userutil"
 	"github.com/element-hq/dendrite/userapi/api"
@@ -34,7 +35,11 @@ func (a *UserInternalAPI) queryDelegatedAuthToken(ctx context.Context, accessTok
 
 	localpart, serverName, err := userutil.ParseUsernameParam(token.Username, a.Config.Matrix)
 	if err != nil || !delegatedLocalpartRegexp.MatchString(localpart) {
-		return fmt.Errorf("token introspection returned an unusable username %q", token.Username)
+		// The provider vouches for a user this server cannot represent. That is a problem with
+		// the token, not a server fault, so clients must not retry it.
+		util.GetLogger(ctx).Warnf("token introspection returned an unusable username %q", token.Username)
+		res.Err = "Forbidden: the access token belongs to a user this server cannot represent"
+		return nil
 	}
 
 	acc, err := a.DB.GetAccountByLocalpart(ctx, localpart, serverName)
@@ -52,16 +57,24 @@ func (a *UserInternalAPI) queryDelegatedAuthToken(ctx context.Context, accessTok
 	} else if err != nil {
 		return err
 	}
+	if acc.Deactivated {
+		res.Err = "Forbidden: this account has been deactivated"
+		return nil
+	}
 
 	device, err := a.DB.GetDeviceByID(ctx, localpart, serverName, token.DeviceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		// Serialise creation so that concurrent first requests do not recreate (and thereby revoke) the device.
 		a.delegatedAuthMu.Lock()
 		defer a.delegatedAuthMu.Unlock()
-		if device, err = a.DB.GetDeviceByID(ctx, localpart, serverName, token.DeviceID); err == nil {
+		device, err = a.DB.GetDeviceByID(ctx, localpart, serverName, token.DeviceID)
+		if err == nil {
 			device.AccountType = acc.AccountType
 			res.Device = device
 			return nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return err
 		}
 		// Devices need an access token in the database. Nobody knows this one and
 		// it is never consulted while authentication is delegated.
