@@ -9,7 +9,7 @@ SLOW=1 ./run.sh     # also waits for an access token to expire (5 minutes) and r
 KEEP=1 ./run.sh     # leave the lab running afterwards (Dendrite on :8008, MAS on :8080)
 ```
 
-It needs Docker, `curl`, `jq` and `openssl`. `setup.sh` builds the image from this checkout and writes the configuration, keys and secrets into
+It needs Docker, `curl`, `jq` and `openssl`. URL previews are switched on and rate limiting is switched off in the generated configuration of Dendrite: the checks send bursts of requests and test behaviour, not limits. `setup.sh` builds the image from this checkout and writes the configuration, keys and secrets into
 `generated/` (not committed). The names `mas` and `dendrite` are mapped to localhost by `curl --resolve`, so the issuer is the same for the checks and for the containers.
 
 ## What the checks do

@@ -153,6 +153,127 @@ expect "not_tags filter hides the favourite" "[]" "$(filter_rooms '{"not_tags":[
 expect "an unused tag matches nothing" "[]" "$(filter_rooms '{"tags":["u.other"]}')"
 expect "a space the user is not in matches nothing" "[]" "$(filter_rooms "{\"spaces\":[\"$ROOM\"]}")"
 
+section "Room summary (MSC3266)"
+call POST $HS/_matrix/client/v3/createRoom "$ALICE" '{"name":"Open room","topic":"Anyone","preset":"public_chat","room_alias_name":"open"}'
+expect_code "create a public room" 200
+OPEN=$(echo "$BODY" | jq -r .room_id)
+call GET "$HS/_matrix/client/v1/room_summary/$OPEN"
+expect_code "anonymous summary of a public room" 200
+expect "summary name" "Open room" "$(echo "$BODY" | jq -r .name)"
+expect "summary topic" "Anyone" "$(echo "$BODY" | jq -r .topic)"
+expect "summary join rule" "public" "$(echo "$BODY" | jq -r .join_rule)"
+expect "summary has no membership when anonymous" "null" "$(echo "$BODY" | jq -r .membership)"
+call GET "$HS/_matrix/client/v1/room_summary/%23open%3Alab.test" "$ALICE"
+expect "summary through the alias, as a member" "join" "$(echo "$BODY" | jq -r .membership)"
+expect "summary has the room version" "true" "$(echo "$BODY" | jq '.room_version != null')"
+call GET "$HS/_matrix/client/unstable/im.nheko.summary/summary/$OPEN" "$ALICE"
+expect "unstable path, prefixed room version" "true" "$(echo "$BODY" | jq '.["im.nheko.summary.room_version"] != null')"
+call GET "$HS/_matrix/client/unstable/im.nheko.summary/rooms/$OPEN/summary" "$ALICE"
+expect_code "unstable path under rooms" 200
+call GET "$HS/_matrix/client/v1/room_summary/$ROOM"
+expect_err "anonymous summary of a private room" 404 M_NOT_FOUND
+call GET "$HS/_matrix/client/v1/room_summary/$ROOM" "$ALICE"
+expect "a member sees a private room" "join" "$(echo "$BODY" | jq -r .membership)"
+call GET "$HS/_matrix/client/v1/room_summary/not-a-room" "$ALICE"
+expect_err "an invalid identifier" 400 M_INVALID_PARAM
+
+section "Threads list (MSC3856)"
+call PUT "$HS/_matrix/client/v3/rooms/$ROOM/send/m.room.message/thread-root" "$ALICE" '{"msgtype":"m.text","body":"thread root"}'
+THREAD_ROOT=$(echo "$BODY" | jq -r .event_id)
+call PUT "$HS/_matrix/client/v3/rooms/$ROOM/send/m.room.message/thread-reply" "$ALICE" "{\"msgtype\":\"m.text\",\"body\":\"thread reply\",\"m.relates_to\":{\"rel_type\":\"m.thread\",\"event_id\":\"$THREAD_ROOT\"}}"
+THREAD_REPLY=$(echo "$BODY" | jq -r .event_id)
+for i in $(seq 1 20); do
+  call GET "$HS/_matrix/client/v1/rooms/$ROOM/threads" "$ALICE"
+  [ "$(echo "$BODY" | jq '.chunk | length')" -ge 1 ] && break
+  sleep 0.5
+done
+expect_code "list the threads" 200
+expect "the root is listed" "$THREAD_ROOT" "$(echo "$BODY" | jq -r '.chunk[0].event_id')"
+expect "bundled latest reply" "$THREAD_REPLY" "$(echo "$BODY" | jq -r '.chunk[0].unsigned["m.relations"]["m.thread"].latest_event.event_id')"
+expect "bundled count" "1" "$(echo "$BODY" | jq '.chunk[0].unsigned["m.relations"]["m.thread"].count')"
+expect "bundled participation" "true" "$(echo "$BODY" | jq '.chunk[0].unsigned["m.relations"]["m.thread"].current_user_participated')"
+call GET "$HS/_matrix/client/v1/rooms/$ROOM/threads?include=participated&limit=5" "$ALICE"
+expect "participated threads" "1" "$(echo "$BODY" | jq '.chunk | length')"
+call GET "$HS/_matrix/client/unstable/org.matrix.msc3856/rooms/$ROOM/threads" "$ALICE"
+expect_code "unstable path" 200
+call GET "$HS/_matrix/client/v1/rooms/$ROOM/threads?include=bogus" "$ALICE"
+expect_err "invalid include" 400 M_INVALID_PARAM
+call GET "$HS/_matrix/client/v1/rooms/$ROOM/threads"
+expect_err "needs a token" 401 M_MISSING_TOKEN
+
+section "Knocking"
+mas_cli register-user --yes --password 'third-user-pw-1' carol >/dev/null
+sleep 3
+login carol third-user-pw-1
+CAROL=$ACCESS
+call POST $HS/_matrix/client/v3/createRoom "$ALICE" '{"name":"Knock room","preset":"private_chat","room_version":"10","initial_state":[{"type":"m.room.join_rules","state_key":"","content":{"join_rule":"knock"}}]}'
+expect_code "create a room that can be knocked on" 200
+KNOCK_ROOM=$(echo "$BODY" | jq -r .room_id)
+call POST "$HS/_matrix/client/v3/knock/$ROOM" "$CAROL" '{"reason":"let me in"}'
+expect_err "knocking on an invite-only room is refused" 403 M_FORBIDDEN
+call POST "$HS/_matrix/client/v3/knock/$KNOCK_ROOM" "$CAROL" '{"reason":"let me in"}'
+expect_code "knock" 200
+expect "knock answers with the room" "$KNOCK_ROOM" "$(echo "$BODY" | jq -r .room_id)"
+call GET "$HS/_matrix/client/v3/rooms/$KNOCK_ROOM/state/m.room.member/%40carol%3Alab.test" "$ALICE"
+expect "the room members see the knock" "knock" "$(echo "$BODY" | jq -r .membership)"
+expect "the knock has the reason" "let me in" "$(echo "$BODY" | jq -r .reason)"
+for i in $(seq 1 20); do
+  call POST "$SS?timeout=0" "$CAROL" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":1,"required_state":[]}}}'
+  [ "$(echo "$BODY" | jq --arg r "$KNOCK_ROOM" '.rooms | has($r)')" = true ] && break
+  sleep 0.5
+done
+expect "the knocked room is in the room list" "true" "$(echo "$BODY" | jq --arg r "$KNOCK_ROOM" '.rooms | has($r)')"
+expect "the knocked room shows its name" "Knock room" "$(echo "$BODY" | jq -r --arg r "$KNOCK_ROOM" '[.rooms[$r].invite_state[]? | select(.type == "m.room.name") | .content.name][0]')"
+call POST "$HS/_matrix/client/v3/rooms/$KNOCK_ROOM/leave" "$CAROL" '{}'
+expect_code "withdraw the knock" 200
+call GET "$HS/_matrix/client/v3/rooms/$KNOCK_ROOM/state/m.room.member/%40carol%3Alab.test" "$ALICE"
+expect "the knock is gone" "leave" "$(echo "$BODY" | jq -r .membership)"
+call POST "$HS/_matrix/client/v3/knock/$KNOCK_ROOM" "$CAROL"
+expect_code "knock again, without a body" 200
+call POST "$HS/_matrix/client/v3/rooms/$KNOCK_ROOM/invite" "$ALICE" '{"user_id":"@carol:lab.test"}'
+expect_code "accept the knock by inviting the user" 200
+call POST "$HS/_matrix/client/v3/join/$KNOCK_ROOM" "$CAROL" '{}'
+expect_code "the user joins" 200
+call POST "$HS/_matrix/client/v3/knock/$KNOCK_ROOM" "$CAROL"
+expect_err "a member cannot knock" 403 M_FORBIDDEN
+call POST "$HS/_matrix/client/v3/knock/%21nothere%3Alab.test" "$CAROL"
+expect_err "an unknown room" 404 M_NOT_FOUND
+call POST "$HS/_matrix/client/v3/knock/$KNOCK_ROOM"
+expect_err "needs a token" 401 M_MISSING_TOKEN
+
+section "Public rooms filters"
+call POST $HS/_matrix/client/v3/createRoom "$ALICE" '{"name":"Directory space","visibility":"public","preset":"public_chat","creation_content":{"type":"m.space"}}'
+SPACE=$(echo "$BODY" | jq -r .room_id)
+call POST $HS/_matrix/client/v3/createRoom "$ALICE" '{"name":"Directory room","visibility":"public","preset":"public_chat"}'
+PLAIN=$(echo "$BODY" | jq -r .room_id)
+public_rooms() { call POST "$HS/_matrix/client/v3/publicRooms" "$ALICE" "{\"filter\":$1}"; echo "$BODY" | jq -c '[.chunk[].room_id] | sort'; }
+expect "no filter lists both" "$(jq -nc --arg a "$SPACE" --arg b "$PLAIN" '[$a,$b] | sort')" "$(public_rooms '{}')"
+expect "the space type lists the space" "[\"$SPACE\"]" "$(public_rooms '{"room_types":["m.space"]}')"
+expect "null lists rooms without a type" "[\"$PLAIN\"]" "$(public_rooms '{"room_types":[null]}')"
+expect "a type and null list both" "$(jq -nc --arg a "$SPACE" --arg b "$PLAIN" '[$a,$b] | sort')" "$(public_rooms '{"room_types":["m.space",null]}')"
+expect "a search term and a type" "[]" "$(public_rooms '{"generic_search_term":"plain","room_types":["m.space"]}')"
+call POST "$HS/_matrix/client/v3/publicRooms" "$ALICE" '{"filter":{"room_types":["m.space"]}}'
+expect "the room type is in the entry" "m.space" "$(echo "$BODY" | jq -r '.chunk[0].room_type')"
+
+section "URL previews (SSRF protection)"
+PREVIEW="$HS/_matrix/client/v1/media/preview_url"
+call GET "$PREVIEW?url=http%3A%2F%2Fdendrite%3A8008%2F_matrix%2Fclient%2Fversions" "$ALICE"
+expect_err "a server inside the network is refused" 502 M_UNKNOWN
+call GET "$PREVIEW?url=http%3A%2F%2F169.254.169.254%2Flatest%2Fmeta-data%2F" "$ALICE"
+expect_err "the metadata address is refused" 502 M_UNKNOWN
+call GET "$PREVIEW?url=http%3A%2F%2F127.0.0.1%3A8008%2F" "$ALICE"
+expect_err "the loopback address is refused" 502 M_UNKNOWN
+call GET "$PREVIEW?url=http%3A%2F%2F%5B%3A%3Affff%3A127.0.0.1%5D%2F" "$ALICE"
+expect_err "an IPv4 address in IPv6 is refused" 502 M_UNKNOWN
+call GET "$PREVIEW?url=file%3A%2F%2F%2Fetc%2Fpasswd" "$ALICE"
+expect_err "other schemes are refused" 400 M_INVALID_PARAM
+call GET "$PREVIEW" "$ALICE"
+expect_err "the URL is required" 400 M_MISSING_PARAM
+call GET "$PREVIEW?url=http%3A%2F%2Fexample.org%2F"
+expect_err "a token is required" 401 M_MISSING_TOKEN
+call GET "$HS/_matrix/media/v3/preview_url?url=http%3A%2F%2F10.0.0.1%2F" "$ALICE"
+expect_err "the older path is guarded the same way" 502 M_UNKNOWN
+
 section "Media"
 CONTENT=$(curl -s -H "Authorization: Bearer $ALICE" -H 'Content-Type: text/plain' --data-binary 'media body' "$HS/_matrix/media/v3/upload?filename=a.txt")
 MXC=$(echo "$CONTENT" | jq -r .content_uri)
@@ -172,6 +293,7 @@ ALICE2=$(echo "$NEW" | jq -r .access_token); ALICE_REFRESH2=$(echo "$NEW" | jq -
 if [ "$ALICE2" != null ] && [ "$ALICE2" != "$ALICE" ]; then ok "refresh gives a new access token"; else bad "refresh gives a new access token" "$NEW"; fi
 expect "refresh rotates the refresh token" "true" "$([ "$ALICE_REFRESH2" != null ] && [ "$ALICE_REFRESH2" != "$ALICE_REFRESH" ] && echo true || echo false)"
 call GET $HS/_matrix/client/v3/account/whoami "$ALICE2"
+expect_code "whoami with the refreshed token" 200
 expect "refreshed token keeps the device" "$ALICE_DEVICE" "$(echo "$BODY" | jq -r .device_id)"
 ALICE=$ALICE2; ALICE_REFRESH=$ALICE_REFRESH2
 
@@ -202,6 +324,8 @@ call GET $HS/_matrix/client/v3/devices "$ALICE"
 expect "revoking removed that device on the homeserver" "false" "$(echo "$BODY" | jq --arg d "$DEVICE_B" '[.devices[].device_id] | index($d) != null')"
 call GET $HS/_matrix/client/v3/account/whoami "$ALICE"
 expect_code "the other session is unaffected" 200
+call GET "$HS/_matrix/client/v1/room_summary/$OPEN" "$ALICE_B"
+expect_err "a room summary with a revoked token is refused, not treated as anonymous" 401 M_UNKNOWN_TOKEN
 
 section "Compatibility token and admin scope"
 CT=$(mas_cli issue-compatibility-token alice COMPAT1 --yes-i-want-to-grant-synapse-admin-privileges | grep -o 'mct_[A-Za-z0-9_]*' | head -1)

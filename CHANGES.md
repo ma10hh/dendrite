@@ -6,6 +6,11 @@
  - Dendrite now refuses a configuration with duplicate keys or keys it does not know, and names them with their line numbers. Before, the last of two blocks with the same key silently won and misspelled or removed options (for example `kafka`, `server_key_api` or `pusher_database` from older versions) were ignored. Remove them, or run `generate-config -normalise dendrite.yaml` to write the file out again in the current form: it still reads old configurations. Application service registration files are not affected.
 
 ### Features
+ - Add knocking: `POST /_matrix/client/v3/knock/{roomIdOrAlias}` for rooms this server is in, leaving a room withdraws the knock, and the federation endpoints `make_knock` and `send_knock` let users of other servers knock on rooms of this server. Knocking on rooms of other servers is not supported yet.
+ - Add URL previews (`GET /_matrix/client/v1/media/preview_url` and `/_matrix/media/v3/preview_url`), off by default (`media_api.url_previews`). Connections to private, loopback, link local and reserved addresses are always refused, also after redirects and for names that resolve to them. Images are only kept for common raster types.
+ - `/publicRooms` filters by `room_types` and lists the `room_type` of each room, on the client and the federation API. The federation API also applies the search term now.
+ - Add the room summary API ([MSC3266](https://github.com/matrix-org/matrix-spec-proposals/pull/3266)) at `/_matrix/client/v1/room_summary/{roomIdOrAlias}`, for local and remote rooms, with the unstable `im.nheko.summary` paths.
+ - Add the threads list API ([MSC3856](https://github.com/matrix-org/matrix-spec-proposals/pull/3856)) at `/_matrix/client/v1/rooms/{roomId}/threads`, with the bundled aggregation of each thread.
  - Sliding sync: add the `spaces`, `tags` and `not_tags` list filters and the `set_presence` parameter.
  - `/sync` supports `state_after` ([MSC4222](https://github.com/matrix-org/matrix-spec-proposals/pull/4222)) with `use_state_after`, and `/versions` advertises `org.matrix.msc4222`.
  - Add experimental support for signing in with a QR code: the rendezvous endpoints of [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388), enabled with `client_api.rendezvous`.
@@ -13,6 +18,12 @@
  - Add a Matrix Authentication Service mode to the experimental delegated authentication (`client_api.msc3861.shared_secret`): tokens are introspected with the shared secret, MAS provisions users and devices through the `/_synapse/mas/` endpoints (`query_user`, `provision_user`, `upsert_device`, `sync_devices`, `allow_cross_signing_reset` and the others), and sessions with the `urn:synapse:admin:*` scope are admins. See `docs/administration/7_delegated_auth.md`.
  - Add experimental support for delegating authentication to an external OAuth 2.0 / OpenID Connect provider, as proposed by [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861). Dendrite acts as the resource server: it validates access tokens by introspection, provisions accounts and devices from the token scopes, serves `/_matrix/client/v1/auth_metadata`, and disables the legacy login, registration, password and device-deletion endpoints. Enable it with `client_api.msc3861`. See `docs/administration/7_delegated_auth.md`.
  - Add support for [MSC4186](https://github.com/matrix-org/matrix-spec-proposals/pull/4186) (Simplified Sliding Sync) at `/_matrix/client/unstable/org.matrix.simplified_msc3575/sync`, the API Element X uses for fast login and sync. Supports lists, room subscriptions, `required_state`, lazy-loaded members, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions. Presence is not supported. The server advertises `org.matrix.simplified_msc3575` in `/versions`. See `docs/other/sliding-sync.md`.
+
+
+### Bug fixes
+ - On SQLite, the `types` and `not_types` of event filters ignored a `*` at the end of a type (`m.room.*`), as Postgres does not.
+ - `/context` returns the state after the last event it returns instead of the current state, all of it also with `lazy_load_members` (which then only limits the members), and no longer cuts it to `limit`.
+ - `/publicRooms` over federation no longer lists empty entries for rooms it could not read.
 
 ## Dendrite 0.15.2 (2025-08-15)
 

@@ -37,7 +37,7 @@ AS
 
 # The generated file already has msc3861 and rendezvous blocks (disabled). Edit them, a second
 # block with the same key would silently win or lose.
-perl -0pi -e "s/(  msc3861:\n    enabled: )false(\n    issuer: )\"\"(\n    client_id: \"\"\n    client_secret: \"\"\n    client_auth_method: \"\"\n    shared_secret: )\"\"/\${1}true\${2}\"http:\/\/mas:8080\/\"\${3}\"$SECRET\"/; s/(  rendezvous:\n    enabled: )false(\n    allow_unauthenticated: )false/\${1}true\${2}true/; s/well_known_client_name: \"\"/well_known_client_name: \"http:\/\/dendrite:8008\"/; s/config_files: \[\]/config_files:\n    - \/etc\/dendrite\/appservice-bridge.yaml/" generated/dendrite/dendrite.yaml
+perl -0pi -e "s/(  msc3861:\n    enabled: )false(\n    issuer: )\"\"(\n    client_id: \"\"\n    client_secret: \"\"\n    client_auth_method: \"\"\n    shared_secret: )\"\"/\${1}true\${2}\"http:\/\/mas:8080\/\"\${3}\"$SECRET\"/; s/(  rendezvous:\n    enabled: )false(\n    allow_unauthenticated: )false/\${1}true\${2}true/; s/well_known_client_name: \"\"/well_known_client_name: \"http:\/\/dendrite:8008\"/; s/config_files: \[\]/config_files:\n    - \/etc\/dendrite\/appservice-bridge.yaml/; s/(rate_limiting:\n    enabled: )true/\${1}false/; s/(  url_previews:\n    enabled: )false/\${1}true/" generated/dendrite/dendrite.yaml
 grep -q "shared_secret: \"$SECRET\"" generated/dendrite/dendrite.yaml || { echo "could not enable msc3861 in the generated Dendrite config" >&2; exit 1; }
 
 # MAS: the generated secrets and our settings.
