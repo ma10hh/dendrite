@@ -26,6 +26,7 @@ var (
 	randomMessageEvent  rstypes.HeaderedEvent
 	aliceInviteBobEvent rstypes.HeaderedEvent
 	bobLeaveEvent       rstypes.HeaderedEvent
+	bobKnockEvent       rstypes.HeaderedEvent
 	syncPositionVeryOld = types.StreamingToken{PDUPosition: 5}
 	syncPositionBefore  = types.StreamingToken{PDUPosition: 11}
 	syncPositionAfter   = types.StreamingToken{PDUPosition: 12}
@@ -88,6 +89,22 @@ func init() {
 		"origin_server_ts": 12345,
 		"event_id": "$bobLeaveEvent:localhost"
 	}`), &bobLeaveEvent)
+	if err != nil {
+		panic(err)
+	}
+	err = json.Unmarshal([]byte(`{
+		"_room_version": "7",
+		"type": "m.room.member",
+		"state_key": "`+bob+`",
+		"content": {
+			"membership": "knock"
+		},
+		"sender": "`+bob+`",
+		"room_id": "`+roomID+`",
+		"origin": "localhost",
+		"origin_server_ts": 12345,
+		"event_id": "$bobKnockEvent:localhost"
+	}`), &bobKnockEvent)
 	if err != nil {
 		panic(err)
 	}
@@ -377,4 +394,31 @@ func newTestSyncRequest(userID, deviceID string, since types.StreamingToken) typ
 		Log:           util.GetLogger(context.TODO()),
 		Context:       context.TODO(),
 	}
+}
+
+// Test that a knock wakes the knocking user, who is not joined to the room.
+func TestNewKnockEventForUser(t *testing.T) {
+	n := NewNotifier(&TestRoomServer{})
+	n.SetCurrentPosition(syncPositionBefore)
+	n.setUsersJoinedToRooms(map[string][]string{
+		roomID: {alice},
+	})
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		pos, err := waitForEvents(n, newTestSyncRequest(bob, bobDev, syncPositionBefore))
+		if err != nil {
+			t.Errorf("TestNewKnockEventForUser error: %s", err)
+		}
+		mustEqualPositions(t, pos, syncPositionAfter)
+	}()
+
+	stream := lockedFetchUserStream(n, bob, bobDev)
+	waitForBlocking(stream, 1)
+
+	n.OnNewEvent(&bobKnockEvent, "", nil, syncPositionAfter)
+
+	wg.Wait()
 }

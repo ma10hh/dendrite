@@ -113,7 +113,8 @@ func (n *Notifier) OnNewEvent(
 				} else {
 					// Keep the joined user map up-to-date
 					switch membership {
-					case spec.Invite:
+					case spec.Invite, spec.Knock:
+						// The target is not joined, so would not be woken as a member of the room.
 						usersToNotify = append(usersToNotify, targetUserID.String())
 					case spec.Join:
 						// Manually append the new user's ID so they get notified
