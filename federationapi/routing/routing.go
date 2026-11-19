@@ -531,6 +531,51 @@ func Setup(
 		},
 	)).Methods(http.MethodPut)
 
+	v1fedmux.Handle("/make_knock/{roomID}/{userID}", MakeFedAPI(
+		"federation_make_knock", cfg.Matrix.ServerName, cfg.Matrix.IsLocalServerName, keys, wakeup,
+		func(httpReq *http.Request, request *fclient.FederationRequest, vars map[string]string) util.JSONResponse {
+			if roomserverAPI.IsServerBannedFromRoom(httpReq.Context(), rsAPI, vars["roomID"], request.Origin()) {
+				return util.JSONResponse{
+					Code: http.StatusForbidden,
+					JSON: spec.Forbidden("Forbidden by server ACLs"),
+				}
+			}
+			// Without ?ver= the remote side only supports room version 1, which has no knocking.
+			remoteVersions := []gomatrixserverlib.RoomVersion{}
+			for _, v := range httpReq.URL.Query()["ver"] {
+				remoteVersions = append(remoteVersions, gomatrixserverlib.RoomVersion(v))
+			}
+			userID, err := spec.NewUserID(vars["userID"], true)
+			if err != nil {
+				return util.JSONResponse{
+					Code: http.StatusBadRequest,
+					JSON: spec.InvalidParam("Invalid UserID"),
+				}
+			}
+			roomID, err := spec.NewRoomID(vars["roomID"])
+			if err != nil {
+				return util.JSONResponse{
+					Code: http.StatusBadRequest,
+					JSON: spec.InvalidParam("Invalid RoomID"),
+				}
+			}
+			return MakeKnock(httpReq, request, cfg, rsAPI, *roomID, *userID, remoteVersions)
+		},
+	)).Methods(http.MethodGet)
+
+	v1fedmux.Handle("/send_knock/{roomID}/{eventID}", MakeFedAPI(
+		"federation_send_knock", cfg.Matrix.ServerName, cfg.Matrix.IsLocalServerName, keys, wakeup,
+		func(httpReq *http.Request, request *fclient.FederationRequest, vars map[string]string) util.JSONResponse {
+			if roomserverAPI.IsServerBannedFromRoom(httpReq.Context(), rsAPI, vars["roomID"], request.Origin()) {
+				return util.JSONResponse{
+					Code: http.StatusForbidden,
+					JSON: spec.Forbidden("Forbidden by server ACLs"),
+				}
+			}
+			return SendKnock(httpReq, request, cfg, rsAPI, keys, vars["roomID"], vars["eventID"])
+		},
+	)).Methods(http.MethodPut)
+
 	v1fedmux.Handle("/version", httputil.MakeExternalAPI(
 		"federation_version",
 		func(httpReq *http.Request) util.JSONResponse {

@@ -155,7 +155,7 @@ func (r *Leaver) performLeaveRoomByID(
 	if err != nil {
 		return nil, fmt.Errorf("error getting membership: %w", err)
 	}
-	if membership != spec.Join && membership != spec.Invite {
+	if membership != spec.Join && membership != spec.Invite && membership != spec.Knock {
 		return nil, fmt.Errorf("user %q is not joined to the room (membership is %q)", req.Leaver.String(), membership)
 	}
 

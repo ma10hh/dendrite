@@ -40,6 +40,14 @@ type PerformJoinRequest struct {
 	Unsigned      map[string]interface{} `json:"unsigned"`
 }
 
+// PerformKnockRequest asks for a user to knock on a room: to ask for an invite to a room they cannot join.
+type PerformKnockRequest struct {
+	RoomIDOrAlias string                 `json:"room_id_or_alias"`
+	UserID        string                 `json:"user_id"`
+	Content       map[string]interface{} `json:"content"`
+	ServerNames   []spec.ServerName      `json:"server_names"`
+}
+
 type PerformLeaveRequest struct {
 	RoomID string
 	Leaver spec.UserID
