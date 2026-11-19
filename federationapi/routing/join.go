@@ -189,6 +189,7 @@ func SendJoin(
 	keys gomatrixserverlib.JSONVerifier,
 	roomID spec.RoomID,
 	eventID string,
+	omitMembersRequested bool,
 ) util.JSONResponse {
 	roomVersion, err := rsAPI.QueryRoomVersionForRoom(httpReq.Context(), roomID.String())
 	if err != nil {
@@ -333,15 +334,21 @@ func SendJoin(
 	sort.Sort(eventsByDepth(stateAndAuthChainResponse.AuthChainEvents))
 
 	// https://matrix.org/docs/spec/server_server/latest#put-matrix-federation-v1-send-join-roomid-eventid
-	return util.JSONResponse{
-		Code: http.StatusOK,
-		JSON: fclient.RespSendJoin{
-			StateEvents: types.NewEventJSONsFromHeaderedEvents(stateAndAuthChainResponse.StateEvents),
-			AuthEvents:  types.NewEventJSONsFromHeaderedEvents(stateAndAuthChainResponse.AuthChainEvents),
-			Origin:      cfg.Matrix.ServerName,
-			Event:       response.JoinEvent.JSON(),
-		},
+	result := fclient.RespSendJoin{
+		Origin: cfg.Matrix.ServerName,
+		Event:  response.JoinEvent.JSON(),
 	}
+	stateEvents, authChain := stateAndAuthChainResponse.StateEvents, stateAndAuthChainResponse.AuthChainEvents
+	// Rooms with pseudo IDs have no user IDs in the state keys of their memberships, which the rule goes by.
+	if omitMembersRequested && roomVersion != gomatrixserverlib.RoomVersionPseudoIDs {
+		var servers []string
+		stateEvents, authChain, servers = omitMembers(stateEvents, authChain, response.JoinEvent, request.Origin())
+		result.MembersOmitted = true
+		result.ServersInRoom = servers
+	}
+	result.StateEvents = types.NewEventJSONsFromHeaderedEvents(stateEvents)
+	result.AuthEvents = types.NewEventJSONsFromHeaderedEvents(authChain)
+	return util.JSONResponse{Code: http.StatusOK, JSON: result}
 }
 
 type eventsByDepth []*types.HeaderedEvent
