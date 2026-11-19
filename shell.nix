@@ -1,4 +1,9 @@
-{ pkgs ? import <nixpkgs> { } }:
+{ pkgs ? import <nixpkgs> {
+    # libolm is only needed by one client API test (mautrix crypto). nixpkgs marks it insecure,
+    # so it is allowed here by name and used for tests only, never in a release build.
+    config.permittedInsecurePackages = [ "olm-3.2.16" ];
+  }
+}:
 
 # Development shell for Dendrite. Usage: run `nix-shell` in the repository root.
 #
@@ -42,6 +47,7 @@ pkgs.mkShell {
     pkgs.gcc
     pkgs.pkg-config
     pkgs.sqlite
+    pkgs.olm
     pkgs.postgresql
     pkgs.git
     pkgs.gnumake
@@ -55,6 +61,8 @@ pkgs.mkShell {
 
   shellHook = ''
     export DENDRITE_ROOT="$PWD"
+    # nix-shell sets a TMPDIR long enough to break unix socket paths (108 byte limit) in tests.
+    export TMPDIR=/tmp
     export GOPATH="''${GOPATH:-$HOME/go}"
     export PATH="$GOPATH/bin:$PATH"
     # test/db.go reads POSTGRES_HOST for its connection string; createdb reads PGHOST.

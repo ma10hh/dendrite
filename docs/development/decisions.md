@@ -28,3 +28,14 @@ Status is `open` until someone has reviewed the entry, then `reviewed` (or `reve
 | 17 | 2026-11-19 | 1 (review fixes) | `api.Account` gains `Deactivated`. Deactivated accounts, and tokens for usernames the server cannot represent, get 403 | Delete devices only; 401; 500 | A still-active provider token would otherwise recreate devices for a deactivated account. 403 stops clients retrying | Drop the check in `queryDelegatedAuthToken` | open |
 | 18 | 2026-11-19 | 1 (review fixes) | `registration_shared_secret` is ignored (with a warning) while MSC3861 is on | Config error; keep the endpoint | The endpoint creates accounts outside the provider. A warning avoids breaking existing configs | Remove the condition in `clientapi/routing/routing.go` | open |
 | 19 | 2026-11-19 | 1 (review fixes) | The same device listed under the stable and unstable scope prefix counts as one device | Reject any repeated device scope | Providers may emit both prefixes during the MSC2967 transition | Count entries instead of distinct IDs in `parseScope` | open |
+| 20 | 2026-11-19 | 0 | The dev shell allows the insecure nixpkgs package `olm-3.2.16`, by name only | Skip `clientapi` tests locally; build mautrix with a pure-Go olm; allow `olm` | Only `clientapi/clientapi_test.go` needs libolm (CI installs it from apt). The pure-Go option needs a newer mautrix. Test-only, never in release builds | Remove `permittedInsecurePackages` and `pkgs.olm` from `shell.nix`, or bump mautrix and drop the cgo dependency | open |
+| 21 | 2026-11-19 | 0 | The dev shell exports `TMPDIR=/tmp` | Shorten the test socket paths in `setup/base` | nix-shell's TMPDIR is long enough that `TestLandingPage_UnixSocket` exceeds the 108 byte socket path limit and kills the test binary | Remove the export from `shell.nix` | open |
+
+## Session report: phase 0, baseline (2026-11-19)
+
+Unit-test baseline, `go test ./...` in the dev shell with Postgres running (SQLite and Postgres subtests), on `phase-0-baseline`:
+every package passes except `contrib/dendrite-demo-tor` and `contrib/dendrite-demo-i2p`. Those two start a Tor/I2P client in `init()` and panic
+without a daemon, so they are excluded from the baseline. Slowest packages: `clientapi` 208s, `slidingsync` 147s, `roomserver` 135s, `syncapi` 122s.
+
+Not done yet in phase 0: Complement and sytest baseline (needs Docker and the images), the Element X + MAS lab, dependency refresh, the migration framework, `govulncheck`.
+Entries to review: 20, 21.
