@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sync"
 
 	"github.com/element-hq/dendrite/clientapi/auth"
 	"github.com/element-hq/dendrite/clientapi/httputil"
@@ -118,6 +119,9 @@ func GetDevicesByLocalpart(
 }
 
 // UpdateDeviceByID handles PUT on /devices/{deviceID}
+// appserviceDeviceMu keeps two creations of the same device from replacing each other.
+var appserviceDeviceMu sync.Mutex
+
 // createAppserviceDevice creates a device for the user an appservice acts as (MSC4190).
 func createAppserviceDevice(
 	req *http.Request, userAPI api.ClientUserAPI, device *api.Device, deviceID string, displayName *string,
@@ -125,6 +129,18 @@ func createAppserviceDevice(
 	localpart, domain, err := gomatrixserverlib.SplitID('@', device.UserID)
 	if err != nil {
 		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("The appservice does not act as a user")}
+	}
+	appserviceDeviceMu.Lock()
+	defer appserviceDeviceMu.Unlock()
+	var existing api.QueryDevicesResponse
+	if err = userAPI.QueryDevices(req.Context(), &api.QueryDevicesRequest{UserID: device.UserID}, &existing); err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("QueryDevices failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	for _, d := range existing.Devices {
+		if d.ID == deviceID {
+			return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}}
+		}
 	}
 	// Devices need an access token in the database. Nobody knows this one: appservices use their own token.
 	token := make([]byte, 32)

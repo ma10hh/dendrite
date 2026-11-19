@@ -139,6 +139,11 @@ func UploadCrossSigningDeviceKeys(
 		}
 	}
 
+	// An approval covers one replacement of the keys.
+	if requireUIA && cfg.MSC3861.Enabled {
+		consumeCrossSigningReset(device.UserID)
+	}
+
 	return util.JSONResponse{
 		Code: http.StatusOK,
 		JSON: struct{}{},

@@ -93,6 +93,15 @@ func TestCrossSigningResetApproval(t *testing.T) {
 	}
 }
 
+func TestCrossSigningResetApprovalIsConsumed(t *testing.T) {
+	allowCrossSigningReset("@consume-test:example.com")
+	consumeCrossSigningReset("@consume-test:example.com")
+	if crossSigningResetAllowed("@consume-test:example.com") {
+		t.Error("an approval must cover one replacement")
+	}
+	consumeCrossSigningReset("@never-approved:example.com")
+}
+
 func TestMASSharedSecretIsChecked(t *testing.T) {
 	m := &masAPI{cfg: &config.ClientAPI{MSC3861: config.MSC3861{Enabled: true, SharedSecret: "secret"}}}
 	h := m.fromMAS("test", func(*http.Request) util.JSONResponse { return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}} })

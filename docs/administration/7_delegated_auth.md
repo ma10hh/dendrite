@@ -45,12 +45,12 @@ In this mode MAS manages the accounts and devices of the server:
 
 - Dendrite introspects tokens with the shared secret as bearer token and reads the explicit `device_id` that MAS sends for compatibility sessions.
 - Nothing is created on first use. A token whose user or device MAS has not provisioned is refused, and deleting a device (logout) ends the session at once.
-- A session with the `urn:synapse:admin:*` scope is an admin, so the admin API works with MAS-issued tokens.
+- A session with the `urn:synapse:admin:*` scope is an admin, so the admin API works with MAS-issued tokens. The scope is ignored in client ID and secret mode.
 - The endpoints MAS uses to manage the server are served under `/_synapse/mas/`, and only for requests that present the shared secret:
   `query_user`, `provision_user`, `is_localpart_available`, `delete_user`, `reactivate_user`, `set_displayname`, `unset_displayname`,
   `upsert_device`, `delete_device`, `update_device_display_name`, `sync_devices` and `allow_cross_signing_reset`.
 - `delete_user` deactivates the account but cannot erase its data, and `locked` is ignored because Dendrite has no locked accounts.
-- `allow_cross_signing_reset` lets the user replace their cross-signing keys without a password for 10 minutes. The approval is kept in memory and is lost on restart.
+- `allow_cross_signing_reset` lets the user replace their cross-signing keys without a password, once, within 10 minutes. The approval is kept in memory and is lost on restart.
 
 ## What Dendrite does
 
@@ -99,6 +99,6 @@ client_api:
     # allow_unauthenticated: false
 ```
 
-Sessions are kept in memory for five minutes, hold at most 4096 bytes and are limited to 1000 at a time. Only the endpoint to create one needs an access token,
+Sessions are kept in memory for five minutes, hold at most 4096 bytes and are limited to 1000 at a time, of which one user can hold 5 and anonymous creators share 200. Only the endpoint to create one needs an access token,
 and only if `allow_unauthenticated` is not set. The endpoints are `/_matrix/client/v1/rendezvous` and the unstable `/_matrix/client/unstable/io.element.msc4388/rendezvous`.
 The provider (MAS) has to support signing in a device with a QR code as well, through the device authorization grant.

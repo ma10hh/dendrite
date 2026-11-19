@@ -15,12 +15,18 @@ type deviceAPI struct {
 	userapi.ClientUserAPI
 	exists   bool
 	created  []userapi.PerformDeviceCreationRequest
+	existing []userapi.Device
 	deleted  []userapi.PerformDeviceDeletionRequest
 	nextCode int
 }
 
 func (d *deviceAPI) PerformDeviceUpdate(_ context.Context, _ *userapi.PerformDeviceUpdateRequest, res *userapi.PerformDeviceUpdateResponse) error {
 	res.DeviceExists = d.exists
+	return nil
+}
+
+func (d *deviceAPI) QueryDevices(_ context.Context, _ *userapi.QueryDevicesRequest, res *userapi.QueryDevicesResponse) error {
+	res.Devices = d.existing
 	return nil
 }
 
@@ -52,6 +58,12 @@ func TestAppserviceCreatesDevices(t *testing.T) {
 	c := api.created[0]
 	if c.Localpart != "ghost" || string(c.ServerName) != "example.com" || *c.DeviceID != "NEWDEV" || *c.DeviceDisplayName != "Bridge device" || c.AccessToken == "" {
 		t.Errorf("unexpected device creation %+v", c)
+	}
+
+	// A concurrent creation of the same device is not repeated.
+	api = &deviceAPI{existing: []userapi.Device{{ID: "NEWDEV"}}}
+	if code := put(api, bridge, `{}`); code != http.StatusOK || len(api.created) != 0 {
+		t.Errorf("device that appeared meanwhile: got %d with %d created, want 200 and none", code, len(api.created))
 	}
 
 	// Users cannot create devices this way, and existing devices are only updated.

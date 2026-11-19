@@ -302,3 +302,12 @@ func TestInvalidate(t *testing.T) {
 		t.Errorf("introspection endpoint called %d times, want 2 after invalidating", n)
 	}
 }
+
+func TestAdminScopeOnlyCountsInMASMode(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	f.response = `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:* urn:synapse:admin:*", "device_id": "D"}`
+	tok, err := New(f.config()).Introspect(context.Background(), "tok")
+	if err != nil || tok == nil || tok.IsAdmin {
+		t.Errorf("a generic provider must not make admins: got (%+v, %v)", tok, err)
+	}
+}

@@ -31,6 +31,11 @@ const (
 	// A normal exchange needs a handful of transaction IDs.
 	rendezvousMaxTxns     = 64
 	rendezvousMaxSessions = 1000
+	// One user cannot fill the store. Anonymous creators (when allowed) share a smaller pool, so that
+	// users with an access token can still create sessions. The requesting address cannot be used:
+	// it is only as trustworthy as the X-Forwarded-For header the client sends.
+	rendezvousMaxPerUser   = 5
+	rendezvousMaxAnonymous = 200
 
 	errConcurrentWrite         spec.MatrixErrorCode = "M_CONCURRENT_WRITE"
 	errConcurrentWriteUnstable spec.MatrixErrorCode = "IO_ELEMENT_MSC4388_CONCURRENT_WRITE"
@@ -41,6 +46,7 @@ const (
 var opaqueIdentifier = regexp.MustCompile(`^[0-9a-zA-Z._~-]{1,255}$`)
 
 type rendezvousSession struct {
+	owner   string
 	data    string
 	seq     int64
 	expires time.Time
@@ -85,11 +91,24 @@ func (s *rendezvousStore) get(id string) *rendezvousSession {
 	return sess
 }
 
-func (s *rendezvousStore) create(data string) (id string, sess *rendezvousSession, err error) {
+func (s *rendezvousStore) create(data, owner string) (id string, sess *rendezvousSession, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.sweep()
 	if len(s.sessions) >= rendezvousMaxSessions {
+		return "", nil, errTooManyRendezvous
+	}
+	limit := rendezvousMaxPerUser
+	if owner == "" {
+		limit = rendezvousMaxAnonymous
+	}
+	owned := 0
+	for _, other := range s.sessions {
+		if other.owner == owner {
+			owned++
+		}
+	}
+	if owned >= limit {
 		return "", nil, errTooManyRendezvous
 	}
 	b := make([]byte, 16)
@@ -97,7 +116,7 @@ func (s *rendezvousStore) create(data string) (id string, sess *rendezvousSessio
 		return "", nil, err
 	}
 	id = base64.RawURLEncoding.EncodeToString(b)
-	sess = &rendezvousSession{data: data, seq: 1, expires: s.now().Add(rendezvousLifetime), txns: map[string]string{}}
+	sess = &rendezvousSession{owner: owner, data: data, seq: 1, expires: s.now().Add(rendezvousLifetime), txns: map[string]string{}}
 	s.sessions[id] = sess
 	return id, sess, nil
 }
@@ -138,29 +157,30 @@ func setupRendezvousRoutes(
 	router.Handle("/rendezvous/{rendezvousId}/{txnId}", handle("rendezvous_send", r.send)).Methods(http.MethodPut, http.MethodOptions)
 }
 
-// authenticated reports whether the request carries a valid access token. A token that is
+// requester returns the user that made the request, or "" for an anonymous request. A token that is
 // present but not valid is an error, not an anonymous request.
-func (r *rendezvousAPI) authenticated(req *http.Request) (bool, *util.JSONResponse) {
+func (r *rendezvousAPI) requester(req *http.Request) (string, *util.JSONResponse) {
 	if req.Header.Get("Authorization") == "" && req.URL.Query().Get("access_token") == "" {
-		return false, nil
+		return "", nil
 	}
-	if _, errRes := auth.VerifyUserFromRequest(req, r.userAPI); errRes != nil {
-		return false, errRes
+	device, errRes := auth.VerifyUserFromRequest(req, r.userAPI)
+	if errRes != nil {
+		return "", errRes
 	}
-	return true, nil
+	return device.UserID, nil
 }
 
-func (r *rendezvousAPI) mayCreate(req *http.Request) (bool, *util.JSONResponse) {
-	if r.cfg.Rendezvous.AllowUnauthenticated {
-		// Still refuse a bad token if one was sent.
-		_, errRes := r.authenticated(req)
-		return true, errRes
+// mayCreate says whether the requester may create a session, and who owns it.
+func (r *rendezvousAPI) mayCreate(req *http.Request) (ok bool, owner string, errRes *util.JSONResponse) {
+	owner, errRes = r.requester(req)
+	if errRes != nil {
+		return false, "", errRes
 	}
-	return r.authenticated(req)
+	return owner != "" || r.cfg.Rendezvous.AllowUnauthenticated, owner, nil
 }
 
 func (r *rendezvousAPI) discover(req *http.Request) util.JSONResponse {
-	ok, errRes := r.mayCreate(req)
+	ok, _, errRes := r.mayCreate(req)
 	if errRes != nil {
 		return *errRes
 	}
@@ -195,7 +215,7 @@ func tooLarge() util.JSONResponse {
 }
 
 func (r *rendezvousAPI) create(req *http.Request) util.JSONResponse {
-	ok, errRes := r.mayCreate(req)
+	ok, owner, errRes := r.mayCreate(req)
 	if errRes != nil {
 		return *errRes
 	}
@@ -214,7 +234,7 @@ func (r *rendezvousAPI) create(req *http.Request) util.JSONResponse {
 	if len(*body.Data) > rendezvousMaxData {
 		return tooLarge()
 	}
-	id, sess, err := r.store.create(*body.Data)
+	id, sess, err := r.store.create(*body.Data, owner)
 	switch {
 	case errors.Is(err, errTooManyRendezvous):
 		return util.JSONResponse{Code: http.StatusTooManyRequests, JSON: spec.LimitExceeded("Too many rendezvous sessions", 10000)}

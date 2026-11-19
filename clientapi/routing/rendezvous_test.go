@@ -193,7 +193,7 @@ func TestRendezvousExpiryAndLimits(t *testing.T) {
 
 	// The number of sessions is capped, and expired ones make room.
 	for i := 0; i < rendezvousMaxSessions; i++ {
-		if _, _, err := rt.store.create("x"); err != nil {
+		if _, _, err := rt.store.create("x", ""+itoa(i)+":test"); err != nil {
 			t.Fatalf("session %d: %v", i, err)
 		}
 	}
@@ -214,4 +214,31 @@ func TestRendezvousExpiryAndLimits(t *testing.T) {
 func itoa(i int) string {
 	b, _ := json.Marshal(i)
 	return string(b)
+}
+
+func TestRendezvousPerOwnerLimits(t *testing.T) {
+	rt := newRendezvousTest(t, true, true, false)
+	create := func(headers ...string) *httptest.ResponseRecorder {
+		return rt.do(http.MethodPost, "/rendezvous", `{"data": "x"}`, headers...)
+	}
+
+	// One user cannot take all sessions.
+	for i := 0; i < rendezvousMaxPerUser; i++ {
+		rt.expect(create("Authorization", "Bearer valid"), http.StatusOK, "")
+	}
+	rt.expect(create("Authorization", "Bearer valid"), http.StatusTooManyRequests, "M_LIMIT_EXCEEDED")
+
+	// Anonymous creators share a smaller pool ...
+	for i := 0; i < rendezvousMaxAnonymous; i++ {
+		rt.expect(create(), http.StatusOK, "")
+	}
+	rt.expect(create(), http.StatusTooManyRequests, "M_LIMIT_EXCEEDED")
+
+	// ... which leaves room for users, whose sessions free up when they expire.
+	if _, _, err := rt.store.create("x", "@other:test"); err != nil {
+		t.Errorf("another user was locked out: %v", err)
+	}
+	rt.now = rt.now.Add(time.Hour)
+	rt.expect(create("Authorization", "Bearer valid"), http.StatusOK, "")
+	rt.expect(create(), http.StatusOK, "")
 }

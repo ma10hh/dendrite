@@ -51,6 +51,12 @@ func allowCrossSigningReset(userID string) {
 	crossSigningResets.until[userID] = now.Add(crossSigningResetPeriod)
 }
 
+func consumeCrossSigningReset(userID string) {
+	crossSigningResets.Lock()
+	defer crossSigningResets.Unlock()
+	delete(crossSigningResets.until, userID)
+}
+
 func crossSigningResetAllowed(userID string) bool {
 	crossSigningResets.Lock()
 	defer crossSigningResets.Unlock()
@@ -481,7 +487,12 @@ func (m *masAPI) ensureDevice(req *http.Request, user *masUser, deviceID string,
 			return false, nil
 		}
 	}
+	return m.createDevice(req, user, deviceID, displayName)
+}
 
+// createDevice creates a device that is known not to exist. The caller holds deviceMu.
+func (m *masAPI) createDevice(req *http.Request, user *masUser, deviceID string, displayName *string) (bool, error) {
+	ctx := req.Context()
 	// Devices need an access token in the database. Nobody knows this one and
 	// it is never consulted while authentication is delegated.
 	b := make([]byte, 32)
@@ -565,6 +576,8 @@ func (m *masAPI) syncDevices(req *http.Request) util.JSONResponse {
 		target[id] = true
 	}
 
+	m.deviceMu.Lock()
+	defer m.deviceMu.Unlock()
 	var existing userapi.QueryDevicesResponse
 	if err := m.userAPI.QueryDevices(req.Context(), &userapi.QueryDevicesRequest{UserID: user.userID}, &existing); err != nil {
 		return internalError(req, "QueryDevices", err)
@@ -589,7 +602,7 @@ func (m *masAPI) syncDevices(req *http.Request) util.JSONResponse {
 		if have[id] {
 			continue
 		}
-		if _, err := m.ensureDevice(req, user, id, nil); err != nil {
+		if _, err := m.createDevice(req, user, id, nil); err != nil {
 			return internalError(req, "creating a device", err)
 		}
 	}
