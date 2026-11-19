@@ -225,3 +225,49 @@ func TestRetryAfterLostResponseKeepsTxnID(t *testing.T) {
 		t.Fatalf("replay = (%q, %q), want the original response (%q, t1)", replay.Pos, replay.TxnID, second.Pos)
 	}
 }
+
+func TestSetPresence(t *testing.T) {
+	type call struct{ user, presence string }
+	var calls []call
+	h := newTestHandler()
+	h.SetPresenceUpdater(func(user, presence string) { calls = append(calls, call{user, presence}) })
+
+	doQuery := func(query string) (int, spec.MatrixErrorCode) {
+		req := httptest.NewRequest(http.MethodPost, "/sync"+query, strings.NewReader(`{}`))
+		res := h.OnIncomingRequest(req, testDevice)
+		if e, ok := res.JSON.(spec.MatrixError); ok {
+			return res.Code, e.ErrCode
+		}
+		return res.Code, ""
+	}
+
+	for _, tc := range []struct{ query, want string }{
+		{"", ""},
+		{"?set_presence=online", "online"},
+		{"?set_presence=offline", "offline"},
+		{"?set_presence=unavailable", "unavailable"},
+	} {
+		calls = nil
+		if code, _ := doQuery(tc.query); code != http.StatusOK {
+			t.Fatalf("%q: code = %d", tc.query, code)
+		}
+		if len(calls) != 1 || calls[0] != (call{"@alice:test", tc.want}) {
+			t.Errorf("%q: presence updates = %v, want one for %q", tc.query, calls, tc.want)
+		}
+	}
+
+	// An unknown value is refused before anything happens, so a bad request cannot change presence or the session.
+	calls = nil
+	if code, errCode := doQuery("?set_presence=busy"); code != http.StatusBadRequest || errCode != spec.ErrorInvalidParam {
+		t.Errorf("unknown value: got %d %s, want 400 M_INVALID_PARAM", code, errCode)
+	}
+	if len(calls) != 0 {
+		t.Errorf("a refused request changed presence: %v", calls)
+	}
+
+	// Without an updater (presence not wired up) requests still work.
+	h.SetPresenceUpdater(nil)
+	if code, _ := doQuery("?set_presence=online"); code != http.StatusOK {
+		t.Errorf("no updater: code = %d", code)
+	}
+}

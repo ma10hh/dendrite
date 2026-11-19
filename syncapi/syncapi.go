@@ -146,14 +146,17 @@ func AddPublicRoutes(
 
 	rateLimits := httputil.NewRateLimits(&dendriteCfg.ClientAPI.RateLimiting)
 
+	slidingSync := slidingsync.NewHandler(
+		slidingsync.NewConnectionStore(slidingsync.DefaultConnectionTTL, slidingsync.DefaultMaxConnectionsPerDevice),
+		syncDB, userAPI, rsAPI, notifier, eduCache, &dendriteCfg.SyncAPI,
+		processContext.Context(), enableMetrics,
+	)
+	slidingSync.SetPresenceUpdater(requestPool.SetPresence)
+
 	routing.Setup(
 		routers.Client, requestPool, syncDB, userAPI,
 		rsAPI, &dendriteCfg.SyncAPI, caches, fts,
 		rateLimits,
-		slidingsync.NewHandler(
-			slidingsync.NewConnectionStore(slidingsync.DefaultConnectionTTL, slidingsync.DefaultMaxConnectionsPerDevice),
-			syncDB, userAPI, rsAPI, notifier, eduCache, &dendriteCfg.SyncAPI,
-			processContext.Context(), enableMetrics,
-		),
+		slidingSync,
 	)
 }

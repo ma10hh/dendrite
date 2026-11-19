@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -609,4 +610,72 @@ func (f *fakeRoomserver) QueryBulkStateContent(_ context.Context, req *rsapi.Que
 		}
 	}
 	return nil
+}
+
+func TestTagAndSpaceFiltersAgainstStorage(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		hn := newHarness(t, dbType)
+		space, subspace := test.NewRoom(t, hn.alice), test.NewRoom(t, hn.alice)
+		inSpace, removed, deep := test.NewRoom(t, hn.alice), test.NewRoom(t, hn.alice), test.NewRoom(t, hn.alice)
+		fav, favLow, plain := test.NewRoom(t, hn.alice), test.NewRoom(t, hn.alice), test.NewRoom(t, hn.alice)
+		// A space this user is not in, with a child they are in: it must be ignored.
+		bob := test.NewUser(t)
+		foreign := test.NewRoom(t, bob)
+		foreign.CreateAndInsert(t, bob, "m.space.child", map[string]any{"via": []string{"test"}}, test.WithStateKey(inSpace.ID))
+
+		via := map[string]any{"via": []string{"test"}}
+		space.CreateAndInsert(t, hn.alice, "m.space.child", via, test.WithStateKey(inSpace.ID))
+		space.CreateAndInsert(t, hn.alice, "m.space.child", via, test.WithStateKey(subspace.ID))
+		space.CreateAndInsert(t, hn.alice, "m.space.child", via, test.WithStateKey(removed.ID))
+		space.CreateAndInsert(t, hn.alice, "m.space.child", map[string]any{}, test.WithStateKey(removed.ID)) // removed again
+		subspace.CreateAndInsert(t, hn.alice, "m.space.child", via, test.WithStateKey(deep.ID))
+		for _, r := range []*test.Room{space, subspace, inSpace, removed, deep, fav, favLow, plain} {
+			hn.write(r.Events()...)
+		}
+		tag := func(tags ...string) json.RawMessage {
+			m := map[string]any{}
+			for _, tg := range tags {
+				m[tg] = map[string]any{"order": 0.5}
+			}
+			return json.RawMessage(mustJSON(t, map[string]any{"tags": m}))
+		}
+		hn.users.room = map[string]map[string]json.RawMessage{
+			fav.ID:    {"m.tag": tag("m.favourite")},
+			favLow.ID: {"m.tag": tag("m.favourite", "m.lowpriority")},
+			plain.ID:  {"m.tag": json.RawMessage(`not json`)}, // must not break sync
+		}
+		everything := []string{space.ID, subspace.ID, inSpace.ID, removed.ID, deep.ID, fav.ID, favLow.ID, plain.ID}
+		without := func(drop ...string) []string {
+			var out []string
+			for _, id := range everything {
+				if !slices.Contains(drop, id) {
+					out = append(out, id)
+				}
+			}
+			return out
+		}
+
+		for name, tc := range map[string]struct {
+			filters string
+			want    []string
+		}{
+			"favourites":                 {`"filters":{"tags":["m.favourite"]}`, []string{fav.ID, favLow.ID}},
+			"low priority":               {`"filters":{"tags":["m.lowpriority"]}`, []string{favLow.ID}},
+			"favourites not low":         {`"filters":{"tags":["m.favourite"],"not_tags":["m.lowpriority"]}`, []string{fav.ID}},
+			"everything but low":         {`"filters":{"not_tags":["m.lowpriority"]}`, without(favLow.ID)},
+			"unknown tag":                {`"filters":{"tags":["u.nothing"]}`, nil},
+			"children of the space":      {`"filters":{"spaces":["` + space.ID + `"]}`, []string{inSpace.ID, subspace.ID}},
+			"children of the subspace":   {`"filters":{"spaces":["` + subspace.ID + `"]}`, []string{deep.ID}},
+			"both spaces":                {`"filters":{"spaces":["` + space.ID + `","` + subspace.ID + `"]}`, []string{inSpace.ID, subspace.ID, deep.ID}},
+			"a space that is not joined": {`"filters":{"spaces":["` + foreign.ID + `"]}`, nil},
+			"an unknown space":           {`"filters":{"spaces":["!nothing:test"]}`, nil},
+			"space and tag":              {`"filters":{"spaces":["` + space.ID + `"],"tags":["m.favourite"]}`, nil},
+		} {
+			res := hn.mustPost("", listReq("[[0,99]]", 0, ","+tc.filters))
+			if got := int(res.Get("lists.all.count").Int()); got != len(tc.want) {
+				t.Errorf("%s: count = %d, want %d", name, got, len(tc.want))
+			}
+			assertRooms(t, res, tc.want...)
+		}
+	})
 }

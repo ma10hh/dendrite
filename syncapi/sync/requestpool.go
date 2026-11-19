@@ -126,6 +126,12 @@ var lastPresence PresenceMap
 const presenceTimeout = time.Second * 10
 
 // updatePresence sends presence updates to the SyncAPI and FederationAPI
+// SetPresence marks the user as online, idle or offline, like the set_presence parameter of /sync does.
+// An empty value means online.
+func (rp *RequestPool) SetPresence(userID, presence string) {
+	rp.updatePresence(rp.db, presence, userID)
+}
+
 func (rp *RequestPool) updatePresence(db storage.Presence, presence string, userID string) {
 	// allow checking back on presence to set offline if needed
 	rp.updatePresenceInternal(db, presence, userID, true)

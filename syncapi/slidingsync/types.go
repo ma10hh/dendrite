@@ -51,6 +51,11 @@ type ListFilters struct {
 	IsInvite     *bool     `json:"is_invite,omitempty"`
 	RoomTypes    []*string `json:"room_types,omitempty"`
 	NotRoomTypes []*string `json:"not_room_types,omitempty"`
+	// Spaces keeps the rooms that are direct children of any of these spaces the user has joined (subspaces are not followed).
+	Spaces []string `json:"spaces,omitempty"`
+	// Tags keeps the rooms the user tagged with any of these tags; NotTags drops rooms with any of them and wins.
+	Tags    []string `json:"tags,omitempty"`
+	NotTags []string `json:"not_tags,omitempty"`
 }
 
 // StateKeyPair is a `[event type, state key]` entry of `required_state`.

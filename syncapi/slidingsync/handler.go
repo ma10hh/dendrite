@@ -39,6 +39,8 @@ const (
 	// maxRangesPerList and maxRequiredState bound the work one list or subscription can ask for.
 	maxRangesPerList = 100
 	maxRequiredState = 500
+	// maxFilterEntries bounds the spaces and tags one filter can name.
+	maxFilterEntries = 100
 	// maxExtensionScope bounds the lists and rooms an extension can name.
 	maxExtensionScope = 500
 	// maxTimeout caps how long a request may wait for changes. It stays below the server's write timeout.
@@ -58,6 +60,9 @@ type Handler struct {
 	typing   typingSource
 	// shutdown is cancelled when the server stops, which ends waiting requests.
 	shutdown context.Context
+
+	// updatePresence applies the `set_presence` parameter of a request. It is nil when presence is not wired up.
+	updatePresence func(userID, presence string)
 
 	// fill computes one response for a request. It must not change the connection: it returns a function that
 	// does, to be called once the response is going to be sent. It is a field so that session handling can be
@@ -79,6 +84,22 @@ func NewHandler(
 	}
 	h.fill = h.fillResponse
 	return h
+}
+
+// SetPresenceUpdater makes requests mark the user as online, idle or offline as `set_presence` asks, the way /sync does.
+func (h *Handler) SetPresenceUpdater(update func(userID, presence string)) {
+	h.updatePresence = update
+}
+
+// parseSetPresence reads the `set_presence` query parameter. Like Synapse, it only accepts the values of /sync.
+func parseSetPresence(req *http.Request) (string, *util.JSONResponse) {
+	switch v := req.URL.Query().Get("set_presence"); v {
+	case "", "online", "offline", "unavailable":
+		return v, nil
+	default:
+		res := invalidParam("set_presence must be one of online, offline and unavailable")
+		return "", &res
+	}
 }
 
 func unknownPos(msg string) util.JSONResponse {
@@ -144,6 +165,10 @@ func (h *Handler) OnIncomingRequest(req *http.Request, device *userapi.Device) u
 	if resErr != nil {
 		return *resErr
 	}
+	setPresence, resErr := parseSetPresence(req)
+	if resErr != nil {
+		return *resErr
+	}
 
 	var (
 		conn       *Connection
@@ -187,6 +212,9 @@ func (h *Handler) OnIncomingRequest(req *http.Request, device *userapi.Device) u
 	}
 
 	h.noteDeviceActivity(req, device, conn)
+	if h.updatePresence != nil {
+		h.updatePresence(device.UserID, setPresence)
+	}
 
 	activeRequests.Inc()
 	defer activeRequests.Dec()
@@ -365,6 +393,9 @@ func tooLarge(body *Request) string {
 		}
 		if len(list.RequiredState) > maxRequiredState {
 			return fmt.Sprintf("list %q has more than %d required_state entries", name, maxRequiredState)
+		}
+		if f := list.Filters; f != nil && (len(f.Spaces) > maxFilterEntries || len(f.Tags) > maxFilterEntries || len(f.NotTags) > maxFilterEntries) {
+			return fmt.Sprintf("list %q has more than %d spaces or tags in its filters", name, maxFilterEntries)
 		}
 	}
 	for roomID, sub := range body.RoomSubscriptions {

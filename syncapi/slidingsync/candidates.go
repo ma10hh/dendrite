@@ -77,6 +77,9 @@ func (h *Handler) loadCandidates(
 	if err = applyFilterState(ctx, snapshot, c, needs); err != nil {
 		return nil, err
 	}
+	if err = h.applyTagsAndSpaces(ctx, snapshot, userID, memberships, c, needs); err != nil {
+		return nil, err
+	}
 	return c, nil
 }
 
@@ -215,4 +218,94 @@ func applyFilterState(ctx context.Context, snapshot storage.DatabaseTransaction,
 		}
 	}
 	return nil
+}
+
+// applyTagsAndSpaces sets the room tags and space membership that filters ask for.
+func (h *Handler) applyTagsAndSpaces(
+	ctx context.Context, snapshot storage.DatabaseTransaction, userID string,
+	memberships map[string]string, c *candidates, needs attributeNeeds,
+) error {
+	var tags map[string][]string
+	if needs.tags {
+		var err error
+		if tags, err = h.roomTags(ctx, userID); err != nil {
+			return err
+		}
+	}
+	var children map[string]map[string]bool // space ID -> child room IDs
+	if len(needs.spaces) > 0 {
+		var err error
+		if children, err = spaceChildren(ctx, snapshot, needs.spaces, memberships); err != nil {
+			return err
+		}
+	}
+	for i := range c.entries {
+		e := &c.entries[i]
+		e.tags = tags[e.roomID]
+		for space, kids := range children {
+			if kids[e.roomID] {
+				e.inSpaces = append(e.inSpaces, space)
+			}
+		}
+	}
+	return nil
+}
+
+// roomTags returns the tags of each of the user's rooms, from their m.tag room account data.
+// It reads all account data of the user, which is only done when a request filters on tags.
+func (h *Handler) roomTags(ctx context.Context, userID string) (map[string][]string, error) {
+	var res userapi.QueryAccountDataResponse
+	if err := h.userAPI.QueryAccountData(ctx, &userapi.QueryAccountDataRequest{UserID: userID}, &res); err != nil {
+		return nil, fmt.Errorf("loading room tags: %w", err)
+	}
+	tags := map[string][]string{}
+	for roomID, byType := range res.RoomAccountData {
+		raw, ok := byType["m.tag"]
+		if !ok {
+			continue
+		}
+		var content struct {
+			Tags map[string]json.RawMessage `json:"tags"`
+		}
+		if err := json.Unmarshal(raw, &content); err != nil {
+			// Malformed tags must not break sync; the room just has none.
+			logrus.WithError(err).WithFields(logrus.Fields{"user_id": userID, "room_id": roomID}).Warn("ignoring malformed m.tag")
+			continue
+		}
+		for tag := range content.Tags {
+			tags[roomID] = append(tags[roomID], tag)
+		}
+	}
+	return tags, nil
+}
+
+// spaceChildren returns the direct children of each of the given spaces that the user has joined.
+// A child is an m.space.child event whose content has a non-empty `via`; without it the child was removed.
+// Spaces the user has not joined, or that do not exist, are ignored, as are subspaces.
+func spaceChildren(
+	ctx context.Context, snapshot storage.DatabaseTransaction, spaces []string, memberships map[string]string,
+) (map[string]map[string]bool, error) {
+	children := map[string]map[string]bool{}
+	filter := synctypes.DefaultStateFilter()
+	filter.Types = &[]string{"m.space.child"}
+	for _, space := range spaces {
+		if memberships[space] != spec.Join {
+			continue
+		}
+		events, err := snapshot.CurrentState(ctx, space, &filter, nil)
+		if err != nil {
+			return nil, fmt.Errorf("loading children of %s: %w", space, err)
+		}
+		kids := map[string]bool{}
+		for _, ev := range events {
+			if ev.StateKey() == nil || *ev.StateKey() == "" {
+				continue
+			}
+			if via := gjson.GetBytes(ev.Content(), "via"); via.IsArray() && len(via.Array()) > 0 {
+				kids[*ev.StateKey()] = true
+			}
+		}
+		children[space] = kids
+	}
+	return children, nil
 }

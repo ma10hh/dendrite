@@ -6,6 +6,7 @@
 package slidingsync
 
 import (
+	"slices"
 	"sort"
 
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -36,6 +37,10 @@ type roomEntry struct {
 	isEncrypted bool
 	// roomType is the `type` of the room's m.room.create event, nil if it has none.
 	roomType *string
+	// tags are the room tags (m.tag) the user set on the room.
+	tags []string
+	// inSpaces are those of the spaces named by the request's filters that have this room as a child.
+	inSpaces []string
 }
 
 // sortEntries orders rooms for lists. Invites come first, newest first, so that they are
@@ -73,8 +78,29 @@ func (f *ListFilters) matches(e roomEntry) bool {
 	if len(f.RoomTypes) > 0 && !roomTypeIn(e.roomType, f.RoomTypes) {
 		return false
 	}
-	// not_room_types wins over room_types.
+	if len(f.Spaces) > 0 && !anyIn(e.inSpaces, f.Spaces) {
+		return false
+	}
+	if len(f.Tags) > 0 && !anyIn(e.tags, f.Tags) {
+		return false
+	}
+	// not_tags wins over tags, and not_room_types over room_types.
+	if anyIn(e.tags, f.NotTags) {
+		return false
+	}
 	return !roomTypeIn(e.roomType, f.NotRoomTypes)
+}
+
+// anyIn reports whether the two lists share an entry.
+func anyIn(have, want []string) bool {
+	for _, h := range have {
+		for _, w := range want {
+			if h == w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // roomTypeIn reports whether roomType is in the list; a nil entry stands for "no type".
@@ -94,6 +120,10 @@ func roomTypeIn(roomType *string, list []*string) bool {
 type attributeNeeds struct {
 	encrypted bool
 	roomType  bool
+	// tags is set when a filter looks at room tags.
+	tags bool
+	// spaces are the spaces any filter names, without duplicates.
+	spaces []string
 }
 
 func needsFor(req *Request) attributeNeeds {
@@ -104,6 +134,12 @@ func needsFor(req *Request) attributeNeeds {
 		}
 		n.encrypted = n.encrypted || l.Filters.IsEncrypted != nil
 		n.roomType = n.roomType || len(l.Filters.RoomTypes) > 0 || len(l.Filters.NotRoomTypes) > 0
+		n.tags = n.tags || len(l.Filters.Tags) > 0 || len(l.Filters.NotTags) > 0
+		for _, s := range l.Filters.Spaces {
+			if !slices.Contains(n.spaces, s) {
+				n.spaces = append(n.spaces, s)
+			}
+		}
 	}
 	return n
 }

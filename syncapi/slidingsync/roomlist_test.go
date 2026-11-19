@@ -98,7 +98,7 @@ func TestNeedsFor(t *testing.T) {
 		"a": {},
 		"b": {Filters: &ListFilters{IsDM: ptr(true)}},
 	}}
-	if n := needsFor(req); n != (attributeNeeds{}) {
+	if n := needsFor(req); !reflect.DeepEqual(n, attributeNeeds{}) {
 		t.Errorf("is_dm and an absent filter need nothing extra, got %+v", n)
 	}
 	req.Lists["c"] = ListRequest{Filters: &ListFilters{IsEncrypted: ptr(false)}}
@@ -194,5 +194,64 @@ func TestPlanRoomsClampsTimelineLimit(t *testing.T) {
 	}})
 	if got := p.rooms["!a"].TimelineLimit; got != maxTimelineLimit {
 		t.Errorf("timeline_limit = %d, want %d", got, maxTimelineLimit)
+	}
+}
+
+func TestTagAndSpaceFilters(t *testing.T) {
+	fav := roomEntry{roomID: "!fav", tags: []string{"m.favourite"}}
+	lowFav := roomEntry{roomID: "!both", tags: []string{"m.favourite", "m.lowpriority"}}
+	low := roomEntry{roomID: "!low", tags: []string{"m.lowpriority"}}
+	untagged := roomEntry{roomID: "!none"}
+	inA := roomEntry{roomID: "!inA", inSpaces: []string{"!spaceA"}}
+	inB := roomEntry{roomID: "!inB", inSpaces: []string{"!spaceB"}}
+	inBoth := roomEntry{roomID: "!inBoth", inSpaces: []string{"!spaceA", "!spaceB"}}
+	all := []roomEntry{fav, lowFav, low, untagged, inA, inB, inBoth}
+
+	for name, tc := range map[string]struct {
+		filters *ListFilters
+		want    []string
+	}{
+		"tags":                      {&ListFilters{Tags: []string{"m.favourite"}}, []string{"!fav", "!both"}},
+		"any of several tags":       {&ListFilters{Tags: []string{"m.favourite", "m.lowpriority"}}, []string{"!fav", "!both", "!low"}},
+		"not_tags":                  {&ListFilters{NotTags: []string{"m.lowpriority"}}, []string{"!fav", "!none", "!inA", "!inB", "!inBoth"}},
+		"not_tags wins":             {&ListFilters{Tags: []string{"m.favourite"}, NotTags: []string{"m.lowpriority"}}, []string{"!fav"}},
+		"unknown tag":               {&ListFilters{Tags: []string{"u.nothing"}}, nil},
+		"one space":                 {&ListFilters{Spaces: []string{"!spaceA"}}, []string{"!inA", "!inBoth"}},
+		"any of several spaces":     {&ListFilters{Spaces: []string{"!spaceA", "!spaceB"}}, []string{"!inA", "!inB", "!inBoth"}},
+		"space the user is not in":  {&ListFilters{Spaces: []string{"!elsewhere"}}, nil},
+		"spaces and tags are ANDed": {&ListFilters{Spaces: []string{"!spaceA"}, NotTags: []string{"m.favourite"}}, []string{"!inA", "!inBoth"}},
+	} {
+		var got []roomEntry
+		for _, e := range all {
+			if tc.filters.matches(e) {
+				got = append(got, e)
+			}
+		}
+		if !reflect.DeepEqual(ids(got), ids(entriesWithIDs(tc.want))) {
+			t.Errorf("%s: got %v, want %v", name, ids(got), tc.want)
+		}
+	}
+}
+
+func entriesWithIDs(ids []string) []roomEntry {
+	var out []roomEntry
+	for _, id := range ids {
+		out = append(out, roomEntry{roomID: id})
+	}
+	return out
+}
+
+func TestNeedsForTagsAndSpaces(t *testing.T) {
+	req := &Request{Lists: map[string]ListRequest{
+		"a": {Filters: &ListFilters{Tags: []string{"m.favourite"}}},
+		"b": {Filters: &ListFilters{Spaces: []string{"!s1", "!s2"}}},
+		"c": {Filters: &ListFilters{NotTags: []string{"m.lowpriority"}, Spaces: []string{"!s2"}}},
+	}}
+	n := needsFor(req)
+	if !n.tags {
+		t.Error("tag filters need the room tags")
+	}
+	if len(n.spaces) != 2 {
+		t.Errorf("spaces = %v, want the two named spaces once each", n.spaces)
 	}
 }
