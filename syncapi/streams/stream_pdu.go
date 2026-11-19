@@ -378,7 +378,7 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 	}
 
 	// Applies the history visibility rules
-	events, err := applyHistoryVisibilityFilter(ctx, snapshot, p.rsAPI, delta.RoomID, device.UserID, recentEvents)
+	events, err := ApplyHistoryVisibilityFilter(ctx, snapshot, p.rsAPI, delta.RoomID, device.UserID, recentEvents)
 	if err != nil {
 		logrus.WithError(err).Error("unable to apply history visibility filter")
 	}
@@ -487,9 +487,9 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 	return latestPosition, nil
 }
 
-// applyHistoryVisibilityFilter gets the current room state and supplies it to ApplyHistoryVisibilityFilter, to make
+// ApplyHistoryVisibilityFilter gets the current room state and supplies it to ApplyHistoryVisibilityFilter, to make
 // sure we always return the required events in the timeline.
-func applyHistoryVisibilityFilter(
+func ApplyHistoryVisibilityFilter(
 	ctx context.Context,
 	snapshot storage.DatabaseTransaction,
 	rsAPI roomserverAPI.SyncRoomserverAPI,
@@ -590,7 +590,7 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	events := recentEvents
 	// Only apply history visibility checks if the response is for joined rooms
 	if !isPeek {
-		events, err = applyHistoryVisibilityFilter(ctx, snapshot, p.rsAPI, roomID, device.UserID, recentEvents)
+		events, err = ApplyHistoryVisibilityFilter(ctx, snapshot, p.rsAPI, roomID, device.UserID, recentEvents)
 		if err != nil {
 			logrus.WithError(err).Error("unable to apply history visibility filter")
 		}
