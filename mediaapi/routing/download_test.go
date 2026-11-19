@@ -41,3 +41,12 @@ func Test_Multipart(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, responseBody, string(gotResponse))
 }
+
+func Test_setMediaSecurityHeaders(t *testing.T) {
+	h := http.Header{}
+	setMediaSecurityHeaders(h)
+	assert.Contains(t, h.Get("Content-Security-Policy"), "sandbox;")
+	assert.Contains(t, h.Get("Content-Security-Policy"), "script-src 'none'")
+	assert.Equal(t, "nosniff", h.Get("X-Content-Type-Options"))
+	assert.Equal(t, "cross-origin", h.Get("Cross-Origin-Resource-Policy"))
+}

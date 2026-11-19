@@ -368,14 +368,7 @@ func (r *downloadRequest) respondFromLocalFile(
 
 	w.Header().Set("Content-Type", string(responseMetadata.ContentType))
 	w.Header().Set("Content-Length", strconv.FormatInt(int64(responseMetadata.FileSizeBytes), 10))
-	contentSecurityPolicy := "default-src 'none';" +
-		" script-src 'none';" +
-		" plugin-types application/pdf;" +
-		" style-src 'unsafe-inline';" +
-		" object-src 'self';"
-
 	if !r.multipartResponse {
-		w.Header().Set("Content-Security-Policy", contentSecurityPolicy)
 		if _, err = io.Copy(w, responseFile); err != nil {
 			return nil, fmt.Errorf("io.Copy: %w", err)
 		}
@@ -964,4 +957,21 @@ func contentDispositionFor(contentType types.ContentType) string {
 		return "inline"
 	}
 	return "attachment"
+}
+
+// mediaContentSecurityPolicy is the policy recommended by the Client-Server spec for user content.
+// `sandbox` stops uploaded HTML and SVG from running with the origin of the homeserver.
+const mediaContentSecurityPolicy = "sandbox;" +
+	" default-src 'none';" +
+	" script-src 'none';" +
+	" plugin-types application/pdf;" +
+	" style-src 'unsafe-inline';" +
+	" object-src 'self';"
+
+// setMediaSecurityHeaders sets the headers that keep uploaded content from being interpreted
+// as anything but a download or an inert embedded resource.
+func setMediaSecurityHeaders(h http.Header) {
+	h.Set("Content-Security-Policy", mediaContentSecurityPolicy)
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Cross-Origin-Resource-Policy", "cross-origin")
 }

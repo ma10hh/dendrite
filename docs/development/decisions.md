@@ -53,3 +53,11 @@ Dependency-update commit `f2c9e029` passes the full unit suite (excluding `contr
 Audit greps found no string-built SQL. The unauthenticated client routes are the usual ones, and the disabled-endpoint middleware covers the 3pid and register token routes.
 Still open in phase 0: migration framework (needs a design decision: versioned forward-only migrations shared by Postgres and SQLite, one table per database), Complement and sytest baseline and the lab (entry 27), the rest of the code audit (federation input checks, media path handling, `MakeAuthAPI` callers).
 Entries needing a decision: 24 (Go 1.26), 27 (Docker).
+| 28 | 2026-11-19 | 0 (audit) | Media responses now carry `X-Content-Type-Options: nosniff` and a CSP starting with `sandbox`, set once for all media routes in `setMediaSecurityHeaders` | Leave the old CSP; add headers per handler | The old CSP lacked `sandbox` and there was no `nosniff`, so uploaded HTML or SVG with a misleading content type could run in the homeserver's origin. The multipart path set no CSP at all. Matches the Client-Server spec recommendation | Revert the commit | open |
+
+### Session report: phase 0 audit (2026-11-19)
+
+Checked: string-built SQL (none, only placeholder generators), unauthenticated client routes (the standard ones), every admin route (all use `MakeAdminAPI`, except the two server-notice routes, which check `AccountTypeAdmin` inside `SendServerNotice`),
+appservice masquerading (`user_id` is only honoured for appservice tokens and requires the account to exist and be in the appservice's namespace), media paths (derived from the content hash with a prefix check; media IDs are restricted to `A-Za-z0-9_=-`).
+Found and fixed: media security headers (entry 28).
+Not audited in depth: federation input validation, which relies on `gomatrixserverlib` for signature, hash and size checks. Re-check when phase 4 starts.
