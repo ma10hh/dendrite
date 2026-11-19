@@ -30,8 +30,9 @@ The endpoint is read from the provider's metadata (`/.well-known/openid-configur
 
 ## What Dendrite does
 
-- Every access token is introspected. Results are cached for up to a minute (less if the token expires sooner),
-  so a revoked token can keep working for that long. Application service tokens are unaffected.
+- Every access token is introspected. Active tokens are cached for up to a minute (less if the token expires sooner),
+  so a revoked token can keep working for that long. Inactive tokens are cached for 10 seconds, and concurrent lookups of
+  the same token share one request to the provider. Application service tokens are unaffected.
 - A token must carry the scope `urn:matrix:client:api:*` and exactly one `urn:matrix:client:device:<device ID>`
   scope ([MSC2967](https://github.com/matrix-org/matrix-spec-proposals/pull/2967)). The `urn:matrix:org.matrix.msc2967.client:` prefix is accepted too.
   Tokens without them get `403 M_FORBIDDEN`. Inactive tokens get `401 M_UNKNOWN_TOKEN`.
@@ -46,6 +47,7 @@ The endpoint is read from the provider's metadata (`/.well-known/openid-configur
 - These endpoints answer `404 M_UNRECOGNIZED`: `/login`, `/register`, `/logout`, `/logout/all`, `/account/password`,
   `/account/deactivate`, the 3pid write endpoints, `/delete_devices`, `DELETE /devices/{deviceId}` and the
   user-interactive auth fallback pages. `/capabilities` reports `m.change_password` and `m.3pid_changes` as disabled.
+- `registration_shared_secret` is ignored while this is enabled, so `/_synapse/admin/v1/register` is not served.
 - Replacing existing cross-signing keys needs re-authentication and is refused with `403 M_FORBIDDEN`.
   The first upload still works without it.
 
