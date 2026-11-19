@@ -5,6 +5,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/element-hq/dendrite/setup/config"
+	"github.com/matrix-org/util"
 )
 
 func TestDelegatedAuthDisabledEndpoints(t *testing.T) {
@@ -66,5 +70,58 @@ func TestAuthMetadataDisabled(t *testing.T) {
 		if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "M_UNRECOGNIZED") {
 			t.Errorf("got %d %s, want 404 M_UNRECOGNIZED", rec.Code, rec.Body)
 		}
+	}
+}
+
+func TestCrossSigningResetApproval(t *testing.T) {
+	if crossSigningResetAllowed("@approval-test:example.com") {
+		t.Fatal("nothing was approved yet")
+	}
+	allowCrossSigningReset("@approval-test:example.com")
+	if !crossSigningResetAllowed("@approval-test:example.com") {
+		t.Error("the approval was not recorded")
+	}
+	if crossSigningResetAllowed("@someone-else:example.com") {
+		t.Error("the approval must only apply to the approved user")
+	}
+	crossSigningResets.Lock()
+	crossSigningResets.until["@approval-test:example.com"] = time.Now().Add(-time.Second)
+	crossSigningResets.Unlock()
+	if crossSigningResetAllowed("@approval-test:example.com") {
+		t.Error("the approval must expire")
+	}
+}
+
+func TestMASSharedSecretIsChecked(t *testing.T) {
+	m := &masAPI{cfg: &config.ClientAPI{MSC3861: config.MSC3861{Enabled: true, SharedSecret: "secret"}}}
+	h := m.fromMAS("test", func(*http.Request) util.JSONResponse { return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}} })
+	for _, tc := range []struct {
+		header string
+		want   int
+	}{
+		{"", http.StatusForbidden},
+		{"secret", http.StatusForbidden},
+		{"Bearer wrong", http.StatusForbidden},
+		{"Bearer secret ", http.StatusForbidden},
+		{"Bearer secret", http.StatusOK},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/_synapse/mas/query_user", nil)
+		if tc.header != "" {
+			req.Header.Set("Authorization", tc.header)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != tc.want {
+			t.Errorf("Authorization %q: got %d, want %d", tc.header, rec.Code, tc.want)
+		}
+	}
+	// An unset secret must never match, not even an empty bearer token.
+	m.cfg.MSC3861.SharedSecret = ""
+	req := httptest.NewRequest(http.MethodGet, "/_synapse/mas/query_user", nil)
+	req.Header.Set("Authorization", "Bearer ")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("empty secret accepted: got %d", rec.Code)
 	}
 }

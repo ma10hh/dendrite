@@ -70,13 +70,15 @@ func UploadCrossSigningDeviceKeys(
 		requireUIA = keysDiffer(existingMasterKey, keyResp, uploadReq, device.UserID)
 	}
 
-	if requireUIA {
-		if cfg.MSC3861.Enabled {
-			return util.JSONResponse{
-				Code: http.StatusForbidden,
-				JSON: spec.Forbidden("Replacing cross-signing keys requires re-authentication, which is not available while authentication is delegated to an external provider"),
-			}
+	// While authentication is delegated the user approves a replacement at the provider, which
+	// then tells us (MAS: allow_cross_signing_reset) instead of asking for a password here.
+	if requireUIA && cfg.MSC3861.Enabled && !crossSigningResetAllowed(device.UserID) {
+		return util.JSONResponse{
+			Code: http.StatusForbidden,
+			JSON: spec.Forbidden("Replacing cross-signing keys must be approved in the account management of the authentication provider first"),
 		}
+	}
+	if requireUIA && !cfg.MSC3861.Enabled {
 		sessionID := uploadReq.Auth.Session
 		if sessionID == "" {
 			sessionID = util.RandomString(sessionIDLength)
