@@ -8,7 +8,9 @@ package config
 
 import (
 	"fmt"
+	"os"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/matrix-org/gomatrixserverlib/fclient"
@@ -23,6 +25,7 @@ func TestLoadConfigRelative(t *testing.T) {
 			"/my/config/dir/matrix_key.pem": testKey,
 			"/my/config/dir/tls_cert.pem":   testCert,
 		}.readFile,
+		false, // the fixture still has keys of older versions
 	)
 	if err != nil {
 		t.Error("failed to load config:", err)
@@ -342,5 +345,51 @@ func TestMSC3861Verify(t *testing.T) {
 				t.Errorf("Verify() errors = %v, wantErr %v", errs, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestStrictConfigLoading(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		wantErr string
+	}{
+		{"valid", "client_api:\n  msc3861:\n    enabled: true\n", ""},
+		{"duplicate key", "client_api:\n  msc3861:\n    enabled: true\n  msc3861:\n    enabled: false\n", "already set"},
+		{"duplicate nested key", "client_api:\n  msc3861:\n    enabled: true\n    enabled: false\n", "already set"},
+		{"unknown key", "client_api:\n  msc3861:\n    enabld: true\n", "enabld not found"},
+		{"unknown top level key", "kafka: {}\n", "kafka not found"},
+	}
+	for _, tc := range tests {
+		for _, strict := range []bool{true, false} {
+			var c Dendrite
+			err := unmarshalConfig([]byte(tc.yaml), &c, strict)
+			switch {
+			case strict && tc.wantErr != "":
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("%s (strict): got %v, want an error containing %q", tc.name, err, tc.wantErr)
+				}
+			case err != nil:
+				t.Errorf("%s (strict=%v): unexpected error %v", tc.name, strict, err)
+			}
+		}
+	}
+
+	// Reading leniently keeps the last of two blocks, which is why strict reading exists.
+	var c Dendrite
+	if err := unmarshalConfig([]byte(tests[1].yaml), &c, false); err != nil || c.ClientAPI.MSC3861.Enabled {
+		t.Errorf("lenient reading: got enabled=%v err=%v, want the last block (disabled) to win", c.ClientAPI.MSC3861.Enabled, err)
+	}
+}
+
+// The configuration that ships with the repository must load strictly.
+func TestSampleConfigLoadsStrictly(t *testing.T) {
+	data, err := os.ReadFile("../../dendrite-sample.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Dendrite
+	if err := unmarshalConfig(data, &c, true); err != nil {
+		t.Errorf("dendrite-sample.yaml does not load strictly: %v", err)
 	}
 }

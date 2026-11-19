@@ -100,7 +100,7 @@ func main() {
 		}
 	} else {
 		var err error
-		if cfg, err = config.Load(*normalise); err != nil {
+		if cfg, err = config.LoadLenient(*normalise); err != nil {
 			panic(err)
 		}
 	}

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Upgrade notes
+ - Dendrite now refuses a configuration with duplicate keys or keys it does not know, and names them with their line numbers. Before, the last of two blocks with the same key silently won and misspelled or removed options (for example `kafka`, `server_key_api` or `pusher_database` from older versions) were ignored. Remove them, or run `generate-config -normalise dendrite.yaml` to write the file out again in the current form: it still reads old configurations. Application service registration files are not affected.
+
 ### Features
  - Add experimental support for signing in with a QR code: the rendezvous endpoints of [MSC4388](https://github.com/matrix-org/matrix-spec-proposals/pull/4388), enabled with `client_api.rendezvous`.
  - Appservices can manage devices without logging in ([MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) and [MSC4326](https://github.com/matrix-org/matrix-spec-proposals/pull/4326)): `PUT /devices/{deviceId}` creates a device, the `device_id` query parameter acts as one, and deleting devices and replacing cross-signing keys need no user interactive auth. Appservices without `user_id` now act as their sender user. While authentication is delegated they can still register users with `inhibit_login`.

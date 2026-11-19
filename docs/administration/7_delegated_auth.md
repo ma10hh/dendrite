@@ -33,8 +33,8 @@ The endpoint is read from the provider's metadata (`/.well-known/openid-configur
 For [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service) (MAS) set a `shared_secret` instead of a client ID and secret.
 The same value goes into the `matrix.secret` option of MAS, and Dendrite is then reached through the `synapse` homeserver kind.
 
-The configuration that `generate-config` writes already has an `msc3861:` block with `enabled: false`: edit that block. A second `msc3861:` key is not an error,
-the last one wins, so adding one next to it can leave the feature silently switched off.
+The configuration that `generate-config` writes already has an `msc3861:` block with `enabled: false`: edit that block.
+A second `msc3861:` key is refused when Dendrite starts.
 
 ```yaml
 client_api:

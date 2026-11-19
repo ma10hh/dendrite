@@ -157,8 +157,20 @@ type LogrusHook struct {
 type ConfigErrors []string
 
 // Load a yaml config file for a server run as multiple processes or as a monolith.
-// Checks the config to ensure that it is valid.
+// Checks the config to ensure that it is valid. Duplicate and unknown keys are errors:
+// the last of two blocks with the same key would silently win, and a misspelled key
+// would silently be ignored.
 func Load(configPath string) (*Dendrite, error) {
+	return load(configPath, true)
+}
+
+// LoadLenient is like Load but ignores unknown keys and lets the last of duplicate keys win.
+// It is meant for reading an old configuration in order to write it out again in the current form.
+func LoadLenient(configPath string) (*Dendrite, error) {
+	return load(configPath, false)
+}
+
+func load(configPath string, strict bool) (*Dendrite, error) {
 	configData, err := os.ReadFile(configPath)
 	if err != nil {
 		return nil, err
@@ -169,13 +181,23 @@ func Load(configPath string) (*Dendrite, error) {
 	}
 	// Pass the current working directory and os.ReadFile so that they can
 	// be mocked in the tests
-	return loadConfig(basePath, configData, os.ReadFile)
+	return loadConfig(basePath, configData, os.ReadFile, strict)
+}
+
+// unmarshalConfig reads the yaml of a configuration. Strict reading rejects duplicate keys and keys
+// that the configuration does not have.
+func unmarshalConfig(data []byte, into *Dendrite, strict bool) error {
+	if strict {
+		return yaml.UnmarshalStrict(data, into)
+	}
+	return yaml.Unmarshal(data, into)
 }
 
 func loadConfig(
 	basePath string,
 	configData []byte,
 	readFile func(string) ([]byte, error),
+	strict bool,
 ) (*Dendrite, error) {
 	var c Dendrite
 	c.Defaults(DefaultOpts{
@@ -184,8 +206,8 @@ func loadConfig(
 	})
 
 	var err error
-	if err = yaml.Unmarshal(configData, &c); err != nil {
-		return nil, err
+	if err = unmarshalConfig(configData, &c, strict); err != nil {
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	if err = c.check(); err != nil {
