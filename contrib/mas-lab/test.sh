@@ -241,6 +241,43 @@ expect_err "an unknown room" 404 M_NOT_FOUND
 call POST "$HS/_matrix/client/v3/knock/$KNOCK_ROOM"
 expect_err "needs a token" 401 M_MISSING_TOKEN
 
+section "Bundled aggregations (edits, threads, references)"
+ROOMS="$HS/_matrix/client/v3/rooms/$KNOCK_ROOM"
+call PUT "$ROOMS/send/m.room.message/agg-root" "$ALICE" '{"msgtype":"m.text","body":"root"}'
+AGG_ROOT=$(echo "$BODY" | jq -r .event_id)
+call PUT "$ROOMS/send/m.room.message/agg-edit" "$ALICE" "{\"msgtype\":\"m.text\",\"body\":\"* edited\",\"m.new_content\":{\"msgtype\":\"m.text\",\"body\":\"edited\"},\"m.relates_to\":{\"rel_type\":\"m.replace\",\"event_id\":\"$AGG_ROOT\"}}"
+AGG_EDIT=$(echo "$BODY" | jq -r .event_id)
+call PUT "$ROOMS/send/m.room.message/agg-reply" "$CAROL" "{\"msgtype\":\"m.text\",\"body\":\"reply\",\"m.relates_to\":{\"rel_type\":\"m.thread\",\"event_id\":\"$AGG_ROOT\"}}"
+AGG_REPLY=$(echo "$BODY" | jq -r .event_id)
+call PUT "$ROOMS/send/m.room.message/agg-reply2" "$ALICE" "{\"msgtype\":\"m.text\",\"body\":\"reply 2\",\"m.relates_to\":{\"rel_type\":\"m.thread\",\"event_id\":\"$AGG_ROOT\"}}"
+call PUT "$ROOMS/send/m.key.verification.done/agg-ref" "$CAROL" "{\"m.relates_to\":{\"rel_type\":\"m.reference\",\"event_id\":\"$AGG_ROOT\"}}"
+for i in $(seq 1 20); do
+  call GET "$ROOMS/event/$AGG_ROOT" "$ALICE"
+  [ "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.reference"].chunk | length')" = 1 ] && break
+  sleep 0.5
+done
+expect "the event has the latest edit bundled" "$AGG_EDIT" "$(echo "$BODY" | jq -r '.unsigned["m.relations"]["m.replace"].event_id')"
+expect "the content of the event is left alone" "root" "$(echo "$BODY" | jq -r .content.body)"
+expect "the thread has a count" "2" "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.thread"].count')"
+expect "the user took part in the thread" "true" "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.thread"].current_user_participated')"
+expect "the references are bundled" "1" "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.reference"].chunk | length')"
+call GET "$ROOMS/messages?dir=b&limit=20" "$ALICE"
+expect "/messages has them too" "$AGG_EDIT" "$(echo "$BODY" | jq -r --arg e "$AGG_ROOT" '.chunk[] | select(.event_id == $e) | .unsigned["m.relations"]["m.replace"].event_id')"
+call GET "$ROOMS/context/$AGG_ROOT?limit=4" "$ALICE"
+expect "/context has them for the event" "$AGG_EDIT" "$(echo "$BODY" | jq -r '.event.unsigned["m.relations"]["m.replace"].event_id')"
+call POST "$SS?timeout=0" "$ALICE" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":20,"required_state":[]}}}'
+expect "sliding sync has them in the timeline" "$AGG_EDIT" "$(echo "$BODY" | jq -r --arg r "$KNOCK_ROOM" --arg e "$AGG_ROOT" '.rooms[$r].timeline[] | select(.event_id == $e) | .unsigned["m.relations"]["m.replace"].event_id')"
+call PUT "$HS/_matrix/client/v3/user/%40alice%3Alab.test/account_data/m.ignored_user_list" "$ALICE" '{"ignored_users":{"@carol:lab.test":{}}}'
+expect_code "ignore carol" 200
+for i in $(seq 1 20); do
+  call GET "$ROOMS/event/$AGG_ROOT" "$ALICE"
+  [ "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.thread"].count')" = 1 ] && break
+  sleep 0.5
+done
+expect "the replies of an ignored user are not counted" "1" "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.thread"].count')"
+expect "the references of an ignored user are left out" "null" "$(echo "$BODY" | jq '.unsigned["m.relations"]["m.reference"]')"
+call PUT "$HS/_matrix/client/v3/user/%40alice%3Alab.test/account_data/m.ignored_user_list" "$ALICE" '{"ignored_users":{}}'
+
 section "Public rooms filters"
 call POST $HS/_matrix/client/v3/createRoom "$ALICE" '{"name":"Directory space","visibility":"public","preset":"public_chat","creation_content":{"type":"m.space"}}'
 SPACE=$(echo "$BODY" | jq -r .room_id)
