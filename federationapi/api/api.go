@@ -60,6 +60,8 @@ type RoomserverFederationAPI interface {
 	PerformJoin(ctx context.Context, request *PerformJoinRequest, response *PerformJoinResponse)
 	// Handle an instruction to make_leave & send_leave with a remote server.
 	PerformLeave(ctx context.Context, request *PerformLeaveRequest, response *PerformLeaveResponse) error
+	// Handle an instruction to make_knock & send_knock with a remote server.
+	PerformKnock(ctx context.Context, request *PerformKnockRequest, response *PerformKnockResponse) error
 	// Handle sending an invite to a remote server.
 	SendInvite(ctx context.Context, event gomatrixserverlib.PDU, strippedState []gomatrixserverlib.InviteStrippedState) (gomatrixserverlib.PDU, error)
 	// Handle sending an invite to a remote server.
@@ -181,6 +183,22 @@ type PerformOutboundPeekRequest struct {
 
 type PerformOutboundPeekResponse struct {
 	LastError *gomatrix.HTTPError
+}
+
+// PerformKnockRequest asks for a user to knock on a room through the servers that are in it.
+type PerformKnockRequest struct {
+	RoomID      string                 `json:"room_id"`
+	UserID      string                 `json:"user_id"`
+	Content     map[string]interface{} `json:"content"`
+	ServerNames types.ServerNames      `json:"server_names"`
+}
+
+// PerformKnockResponse has the knock that a server accepted, and what it told about the room.
+type PerformKnockResponse struct {
+	Event          gomatrixserverlib.PDU
+	RoomVersion    gomatrixserverlib.RoomVersion
+	KnockRoomState []gomatrixserverlib.InviteStrippedState
+	KnockedVia     spec.ServerName
 }
 
 type PerformLeaveRequest struct {

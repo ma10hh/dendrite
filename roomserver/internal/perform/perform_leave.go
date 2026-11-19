@@ -128,6 +128,11 @@ func (r *Leaver) performLeaveRoomByID(
 		}
 	}
 
+	// A knock on a room this server is not in is withdrawn by leaving the room through the servers that are in it.
+	if outputs, handled, kerr := r.withdrawRemoteKnock(ctx, req, *roomID, *leaver); handled {
+		return outputs, kerr
+	}
+
 	// There's no invite pending, so first of all we want to find out
 	// if the room exists and if the user is actually in it.
 	latestReq := api.QueryLatestEventsAndStateRequest{
@@ -272,4 +277,51 @@ func (r *Leaver) performFederatedRejectInvite(
 			},
 		},
 	}, nil
+}
+
+// withdrawRemoteKnock ends the knock of a user on a room that this server is not in, if there is one: the room server
+// is asked to let the user leave, which is tried once, and the knock goes either way, as for a rejected invite.
+func (r *Leaver) withdrawRemoteKnock(
+	ctx context.Context, req *api.PerformLeaveRequest, roomID spec.RoomID, leaver spec.SenderID,
+) (outputs []api.OutputEvent, handled bool, err error) {
+	info, err := r.DB.RoomInfo(ctx, req.RoomID)
+	if err != nil || info == nil || !info.IsStub() {
+		return nil, false, nil
+	}
+	updater, err := r.DB.MembershipUpdater(ctx, req.RoomID, string(leaver), true, info.RoomVersion)
+	if err != nil {
+		return nil, false, err
+	}
+	knocked := updater.IsKnock()
+	// The transaction is not kept open while the other server is asked.
+	if err = updater.Rollback(); err != nil || !knocked {
+		return nil, false, err
+	}
+
+	leaveReq := fsAPI.PerformLeaveRequest{
+		RoomID:      req.RoomID,
+		UserID:      req.Leaver.String(),
+		ServerNames: []spec.ServerName{roomID.Domain()},
+	}
+	if lerr := r.FSAPI.PerformLeave(ctx, &leaveReq, &fsAPI.PerformLeaveResponse{}); lerr != nil {
+		// The user must be able to give up a knock whatever the other server does.
+		util.GetLogger(ctx).WithError(lerr).Warn("failed to leave the room over federation, still ending the knock")
+	}
+	if updater, err = r.DB.MembershipUpdater(ctx, req.RoomID, string(leaver), true, info.RoomVersion); err != nil {
+		return nil, true, fmt.Errorf("ending the knock: %w", err)
+	}
+	if err = updater.Delete(); err != nil {
+		_ = updater.Rollback()
+		return nil, true, fmt.Errorf("ending the knock: %w", err)
+	}
+	if err = updater.Commit(); err != nil {
+		return nil, true, fmt.Errorf("ending the knock: %w", err)
+	}
+	return []api.OutputEvent{{
+		Type: api.OutputTypeRetireKnockEvent,
+		RetireKnockEvent: &api.OutputRetireKnockEvent{
+			RoomID:         req.RoomID,
+			TargetSenderID: leaver,
+		},
+	}}, true, nil
 }

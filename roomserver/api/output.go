@@ -24,6 +24,10 @@ const (
 	OutputTypeNewInviteEvent OutputType = "new_invite_event"
 	// OutputTypeRetireInviteEvent indicates that the event is an OutputRetireInviteEvent
 	OutputTypeRetireInviteEvent OutputType = "retire_invite_event"
+	// OutputTypeNewKnockEvent indicates that the event is an OutputNewKnockEvent
+	OutputTypeNewKnockEvent OutputType = "new_knock_event"
+	// OutputTypeRetireKnockEvent indicates that the event is an OutputRetireKnockEvent
+	OutputTypeRetireKnockEvent OutputType = "retire_knock_event"
 	// OutputTypeRedactedEvent indicates that the event is an OutputRedactedEvent
 	//
 	// This event is emitted when a redaction has been 'validated' (meaning both the redaction and the event to redact are known).
@@ -66,6 +70,10 @@ type OutputEvent struct {
 	NewInviteEvent *OutputNewInviteEvent `json:"new_invite_event,omitempty"`
 	// The content of event with type OutputTypeRetireInviteEvent
 	RetireInviteEvent *OutputRetireInviteEvent `json:"retire_invite_event,omitempty"`
+	// The content of event with type OutputTypeNewKnockEvent
+	NewKnockEvent *OutputNewKnockEvent `json:"new_knock_event,omitempty"`
+	// The content of event with type OutputTypeRetireKnockEvent
+	RetireKnockEvent *OutputRetireKnockEvent `json:"retire_knock_event,omitempty"`
 	// The content of event with type OutputTypeRedactedEvent
 	RedactedEvent *OutputRedactedEvent `json:"redacted_event,omitempty"`
 	// The content of event with type OutputTypeNewPeek
@@ -199,6 +207,27 @@ type OutputNewInviteEvent struct {
 	RoomVersion gomatrixserverlib.RoomVersion `json:"room_version"`
 	// The "m.room.member" invite event.
 	Event *types.HeaderedEvent `json:"event"`
+}
+
+// An OutputNewKnockEvent is written when a local user knocked on a room that this server is not in. Like an invite,
+// such a knock is not part of a room this server has the events of, so it is tracked on its own.
+type OutputNewKnockEvent struct {
+	// The room version of the room.
+	RoomVersion gomatrixserverlib.RoomVersion `json:"room_version"`
+	// The "m.room.member" knock event, with the stripped state the other server answered with in
+	// unsigned.knock_room_state.
+	Event *types.HeaderedEvent `json:"event"`
+}
+
+// An OutputRetireKnockEvent is written when such a knock ends: it was withdrawn, or the user was invited.
+type OutputRetireKnockEvent struct {
+	RoomID         string        `json:"room_id"`
+	TargetSenderID spec.SenderID `json:"target_sender_id"`
+	// The ID of the knock event.
+	EventID string `json:"event_id,omitempty"`
+	// The membership the user has after it: "leave" if the knock was withdrawn, "invite" if it was answered with an
+	// invite.
+	Membership string `json:"membership"`
 }
 
 // An OutputRetireInviteEvent is written whenever an existing invite is no longer

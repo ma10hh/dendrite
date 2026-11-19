@@ -846,3 +846,97 @@ func (r *FederationInternalAPI) shouldAttemptDirectFederation(
 
 	return !shouldRelay
 }
+
+// PerformKnock implements api.FederationInternalAPI: it asks the servers in turn to make a knock for the user, signs
+// it and sends it, until one of them accepts it.
+func (r *FederationInternalAPI) PerformKnock(
+	ctx context.Context,
+	request *api.PerformKnockRequest,
+	response *api.PerformKnockResponse,
+) error {
+	userID, err := spec.NewUserID(request.UserID, true)
+	if err != nil {
+		return err
+	}
+	roomID, err := spec.NewRoomID(request.RoomID)
+	if err != nil {
+		return err
+	}
+	senderID, err := r.rsAPI.QuerySenderIDForUser(ctx, *roomID, *userID)
+	if err != nil {
+		return err
+	} else if senderID == nil {
+		senderIDValue := spec.SenderID(userID.String())
+		senderID = &senderIDValue
+	}
+
+	var versions []gomatrixserverlib.RoomVersion
+	for version := range version.SupportedRoomVersions() {
+		versions = append(versions, version)
+	}
+
+	util.SortAndUnique(request.ServerNames)
+	var lastErr error
+	for _, serverName := range request.ServerNames {
+		if !r.shouldAttemptDirectFederation(serverName) {
+			continue
+		}
+		respMake, err := r.federation.MakeKnock(ctx, userID.Domain(), serverName, request.RoomID, request.UserID, versions)
+		if err != nil {
+			logrus.WithError(err).WithField("server", serverName).Warn("make_knock failed")
+			r.statistics.ForServer(serverName).Failure()
+			lastErr = err
+			continue
+		}
+		verImpl, err := gomatrixserverlib.GetRoomVersion(respMake.RoomVersion)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		// The other server is trusted for the links of the event into the room, not for what the event is.
+		senderIDString := string(*senderID)
+		respMake.KnockEvent.Type = spec.MRoomMember
+		respMake.KnockEvent.SenderID = senderIDString
+		respMake.KnockEvent.StateKey = &senderIDString
+		respMake.KnockEvent.RoomID = request.RoomID
+		respMake.KnockEvent.Redacts = ""
+		content := map[string]interface{}{}
+		for key, value := range request.Content {
+			content[key] = value
+		}
+		content["membership"] = spec.Knock
+		builder := verImpl.NewEventBuilderFromProtoEvent(&respMake.KnockEvent)
+		if err = builder.SetContent(content); err != nil {
+			lastErr = err
+			continue
+		}
+		if err = builder.SetUnsigned(struct{}{}); err != nil {
+			lastErr = err
+			continue
+		}
+		event, err := builder.Build(time.Now(), userID.Domain(), r.cfg.Matrix.KeyID, r.cfg.Matrix.PrivateKey)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		respSend, err := r.federation.SendKnock(ctx, userID.Domain(), serverName, event)
+		if err != nil {
+			logrus.WithError(err).WithField("server", serverName).Warn("send_knock failed")
+			r.statistics.ForServer(serverName).Failure()
+			lastErr = err
+			continue
+		}
+		r.statistics.ForServer(serverName).Success(statistics.SendDirect)
+		response.Event = event
+		response.RoomVersion = respMake.RoomVersion
+		response.KnockRoomState = respSend.KnockRoomState
+		response.KnockedVia = serverName
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no server could be asked")
+	}
+	return fmt.Errorf("failed to knock on room %q through %d server(s): %w", request.RoomID, len(request.ServerNames), lastErr)
+}

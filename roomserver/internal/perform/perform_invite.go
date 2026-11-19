@@ -104,6 +104,18 @@ func (r *Inviter) ProcessInviteMembership(
 	if updater, err = r.DB.MembershipUpdater(ctx, inviteEvent.RoomID().String(), *inviteEvent.StateKey(), isTargetLocal, inviteEvent.Version()); err != nil {
 		return nil, fmt.Errorf("r.DB.MembershipUpdater: %w", err)
 	}
+	// A knock on a room this server is not in is replaced by the invite that answers it. The consumers have the knock
+	// on its own, as the room has no state of ours that the invite would replace it in.
+	if info, infoErr := r.DB.RoomInfo(ctx, inviteEvent.RoomID().String()); updater.IsKnock() && infoErr == nil && info != nil && info.IsStub() {
+		outputUpdates = append(outputUpdates, api.OutputEvent{
+			Type: api.OutputTypeRetireKnockEvent,
+			RetireKnockEvent: &api.OutputRetireKnockEvent{
+				RoomID:         inviteEvent.RoomID().String(),
+				TargetSenderID: spec.SenderID(*inviteEvent.StateKey()),
+				Membership:     spec.Invite,
+			},
+		})
+	}
 	outputUpdates, err = helpers.UpdateToInviteMembership(updater, &types.Event{
 		EventNID: 0,
 		PDU:      inviteEvent.PDU,

@@ -264,6 +264,20 @@ func (r *RoomserverInternalAPI) PerformInvite(
 	return r.Inviter.PerformInvite(ctx, req)
 }
 
+// PerformKnock implements api.RoomserverInternalAPI
+func (r *RoomserverInternalAPI) PerformKnock(ctx context.Context, req *api.PerformKnockRequest) (string, error) {
+	roomID, outputEvents, err := r.Knocker.Knock(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	if len(outputEvents) > 0 {
+		if err = r.OutputProducer.ProduceRoomEvents(roomID, outputEvents); err != nil {
+			return "", err
+		}
+	}
+	return roomID, nil
+}
+
 func (r *RoomserverInternalAPI) PerformLeave(
 	ctx context.Context,
 	req *api.PerformLeaveRequest,

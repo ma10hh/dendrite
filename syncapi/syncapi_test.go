@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/element-hq/dendrite/syncapi/synctypes"
 
 	"github.com/element-hq/dendrite/clientapi/producers"
+	fsapi "github.com/element-hq/dendrite/federationapi/api"
 	"github.com/element-hq/dendrite/roomserver"
 	"github.com/element-hq/dendrite/roomserver/api"
 	rsapi "github.com/element-hq/dendrite/roomserver/api"
@@ -1716,6 +1718,138 @@ func TestBundledRelations(t *testing.T) {
 		}
 		if gjson.Get(messages, `chunk.#(type=="m.room.create")`).Get(`unsigned.m\.relations`).Exists() {
 			t.Errorf("state events get no aggregations")
+		}
+	})
+}
+
+// fakeKnockFederation answers for the other server: it accepts a knock with the state of the room and lets the user
+// leave.
+type fakeKnockFederation struct {
+	fsapi.RoomserverFederationAPI
+	cfg     *config.Dendrite
+	left    []string
+	knocked []string
+}
+
+func (f *fakeKnockFederation) PerformKnock(_ context.Context, req *fsapi.PerformKnockRequest, res *fsapi.PerformKnockResponse) error {
+	f.knocked = append(f.knocked, req.RoomID)
+	res.Event = remoteMemberEvent(f.cfg, req.RoomID, req.UserID, req.UserID, spec.Knock)
+	res.RoomVersion = gomatrixserverlib.RoomVersionV10
+	res.KnockedVia = "other.example"
+	name, _ := json.Marshal(map[string]any{"type": spec.MRoomName, "state_key": "", "sender": "@admin:other.example", "content": map[string]string{"name": "Remote room"}})
+	var stripped gomatrixserverlib.InviteStrippedState
+	if err := json.Unmarshal(name, &stripped); err != nil {
+		return err
+	}
+	res.KnockRoomState = []gomatrixserverlib.InviteStrippedState{stripped}
+	return nil
+}
+
+func (f *fakeKnockFederation) PerformLeave(_ context.Context, req *fsapi.PerformLeaveRequest, _ *fsapi.PerformLeaveResponse) error {
+	f.left = append(f.left, req.RoomID)
+	return nil
+}
+
+func remoteMemberEvent(cfg *config.Dendrite, roomID, sender, target, membership string) gomatrixserverlib.PDU {
+	proto := gomatrixserverlib.ProtoEvent{
+		SenderID: sender, RoomID: roomID, Type: spec.MRoomMember, StateKey: &target,
+		PrevEvents: []string{"$prev"}, AuthEvents: []string{"$auth"}, Depth: 10,
+	}
+	if err := proto.SetContent(map[string]string{"membership": membership}); err != nil {
+		panic(err)
+	}
+	builder := gomatrixserverlib.MustGetRoomVersion(gomatrixserverlib.RoomVersionV10).NewEventBuilderFromProtoEvent(&proto)
+	ev, err := builder.Build(time.Now(), cfg.Global.ServerName, cfg.Global.KeyID, cfg.Global.PrivateKey)
+	if err != nil {
+		panic(err)
+	}
+	return ev
+}
+
+func TestKnockOnRoomOfOtherServer(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		user := test.NewUser(t)
+		alice := userapi.Device{ID: "ALICEID", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
+
+		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
+		routers := httputil.NewRouters()
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		defer close()
+
+		natsInstance := jetstream.NATSInstance{}
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+		fed := &fakeKnockFederation{cfg: cfg}
+		rsAPI.SetFederationAPI(fed, nil)
+		AddPublicRoutes(processCtx, routers, cfg, cm, &natsInstance, &syncUserAPI{accounts: []userapi.Device{alice}}, rsAPI, caches, caching.DisableMetrics)
+		jsctx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
+		defer jetstream.DeleteAllStreams(jsctx, &cfg.Global.JetStream)
+
+		ctx := context.Background()
+		const roomID = "!remote:other.example"
+		slidingSync := func() gjson.Result {
+			t.Helper()
+			w := httptest.NewRecorder()
+			routers.Client.ServeHTTP(w, test.NewRequest(t, "POST", "/_matrix/client/unstable/org.matrix.simplified_msc3575/sync",
+				test.WithQueryParams(map[string]string{"access_token": alice.AccessToken, "timeout": "0"}),
+				test.WithJSONBody(t, map[string]any{"lists": map[string]any{"all": map[string]any{"ranges": [][]int{{0, 10}}, "timeline_limit": 1, "required_state": [][]string{}}}}),
+			))
+			if w.Code != 200 {
+				t.Fatalf("sliding sync answered %d: %s", w.Code, w.Body.String())
+			}
+			return gjson.Parse(w.Body.String())
+		}
+		waitForRoom := func(want bool, check func(room gjson.Result) bool) {
+			t.Helper()
+			deadline := time.Now().Add(10 * time.Second)
+			for {
+				room := slidingSync().Get("rooms").Get(strings.ReplaceAll(roomID, ".", `\.`))
+				if room.Exists() == want && (!want || check(room)) {
+					return
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("the room is listed: %v, want %v: %s", room.Exists(), want, room.Raw)
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+
+		if _, err := rsAPI.PerformKnock(ctx, &api.PerformKnockRequest{RoomIDOrAlias: roomID, UserID: user.ID, Content: map[string]any{"reason": "please"}}); err != nil {
+			t.Fatalf("PerformKnock: %s", err)
+		}
+		if len(fed.knocked) != 1 {
+			t.Fatalf("the other server was asked %d times", len(fed.knocked))
+		}
+		userID, _ := spec.NewUserID(user.ID, true)
+		// The room is shown with the state the other server sent, and the knock.
+		waitForRoom(true, func(room gjson.Result) bool {
+			return room.Get(`invite_state.#(type=="m.room.name").content.name`).String() == "Remote room" &&
+				room.Get(`invite_state.#(type=="m.room.member").content.membership`).String() == spec.Knock
+		})
+
+		// Withdrawing the knock asks the other server to let the user leave, and the room goes.
+		if err := rsAPI.PerformLeave(ctx, &api.PerformLeaveRequest{RoomID: roomID, Leaver: *userID}, &api.PerformLeaveResponse{}); err != nil {
+			t.Fatalf("PerformLeave: %s", err)
+		}
+		if len(fed.left) != 1 || fed.left[0] != roomID {
+			t.Fatalf("the other server was asked to leave: %v", fed.left)
+		}
+		waitForRoom(false, nil)
+
+		// Knocking again, and then an invite from the other server: the room is an invite, once.
+		if _, err := rsAPI.PerformKnock(ctx, &api.PerformKnockRequest{RoomIDOrAlias: roomID, UserID: user.ID}); err != nil {
+			t.Fatalf("PerformKnock again: %s", err)
+		}
+		waitForRoom(true, func(gjson.Result) bool { return true })
+		invite := remoteMemberEvent(cfg, roomID, "@admin:other.example", user.ID, spec.Invite)
+		if err := rsAPI.(api.FederationRoomserverAPI).HandleInvite(ctx, &rstypes.HeaderedEvent{PDU: invite}); err != nil {
+			t.Fatalf("HandleInvite: %s", err)
+		}
+		waitForRoom(true, func(room gjson.Result) bool {
+			return room.Get(`invite_state.#(type=="m.room.member").content.membership`).String() == spec.Invite
+		})
+		if n := slidingSync().Get("rooms").Map(); len(n) != 1 {
+			t.Fatalf("the room should be listed once, got %v", n)
 		}
 	})
 }
