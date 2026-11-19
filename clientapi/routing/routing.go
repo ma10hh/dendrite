@@ -314,7 +314,7 @@ func Setup(
 	if cfg.MSC3861.Enabled {
 		logrus.Infof("Authentication is delegated to %s (MSC3861)", cfg.MSC3861.Issuer)
 		delegatedAuthProvider = delegatedauth.ForConfig(&cfg.MSC3861)
-		v3mux.Use(delegatedAuthMiddleware)
+		v3mux.Use(delegatedAuthMiddleware(cfg))
 	}
 	if cfg.MSC3861.MASMode() {
 		setupMASRoutes(synapseAdminRouter, cfg, userAPI, rsAPI)

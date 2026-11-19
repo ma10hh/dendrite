@@ -55,14 +55,21 @@ func VerifyUserFromRequest(
 	}
 	var res api.QueryAccessTokenResponse
 	err = userAPI.QueryAccessToken(req.Context(), &api.QueryAccessTokenRequest{
-		AccessToken:      token,
-		AppServiceUserID: req.URL.Query().Get("user_id"),
+		AccessToken:        token,
+		AppServiceUserID:   req.URL.Query().Get("user_id"),
+		AppServiceDeviceID: appServiceDeviceID(req),
 	}, &res)
 	if err != nil {
 		util.GetLogger(req.Context()).WithError(err).Error("userAPI.QueryAccessToken failed")
 		return nil, &util.JSONResponse{
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
+		}
+	}
+	if res.UnknownDevice {
+		return nil, &util.JSONResponse{
+			Code: http.StatusBadRequest,
+			JSON: spec.MatrixError{ErrCode: "M_UNKNOWN_DEVICE", Err: "The appservice asserted a device that does not exist"},
 		}
 	}
 	if res.Err != "" {
@@ -80,6 +87,15 @@ func VerifyUserFromRequest(
 		}
 	}
 	return res.Device, nil
+}
+
+// appServiceDeviceID is the device an appservice asks to act as (MSC4326). The unstable name is accepted too.
+func appServiceDeviceID(req *http.Request) string {
+	q := req.URL.Query()
+	if id := q.Get("device_id"); id != "" {
+		return id
+	}
+	return q.Get("org.matrix.msc3202.device_id")
 }
 
 // GenerateAccessToken creates a new access token. Returns an error if failed to generate

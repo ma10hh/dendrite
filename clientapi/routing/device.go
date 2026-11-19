@@ -7,6 +7,8 @@
 package routing
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net"
@@ -116,6 +118,33 @@ func GetDevicesByLocalpart(
 }
 
 // UpdateDeviceByID handles PUT on /devices/{deviceID}
+// createAppserviceDevice creates a device for the user an appservice acts as (MSC4190).
+func createAppserviceDevice(
+	req *http.Request, userAPI api.ClientUserAPI, device *api.Device, deviceID string, displayName *string,
+) util.JSONResponse {
+	localpart, domain, err := gomatrixserverlib.SplitID('@', device.UserID)
+	if err != nil {
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("The appservice does not act as a user")}
+	}
+	// Devices need an access token in the database. Nobody knows this one: appservices use their own token.
+	token := make([]byte, 32)
+	if _, err = rand.Read(token); err != nil {
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	var res api.PerformDeviceCreationResponse
+	if err = userAPI.PerformDeviceCreation(req.Context(), &api.PerformDeviceCreationRequest{
+		Localpart:         localpart,
+		ServerName:        domain,
+		AccessToken:       base64.RawURLEncoding.EncodeToString(token),
+		DeviceID:          &deviceID,
+		DeviceDisplayName: displayName,
+	}, &res); err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("PerformDeviceCreation failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	return util.JSONResponse{Code: http.StatusCreated, JSON: struct{}{}}
+}
+
 func UpdateDeviceByID(
 	req *http.Request, userAPI api.ClientUserAPI, device *api.Device,
 	deviceID string,
@@ -143,6 +172,10 @@ func UpdateDeviceByID(
 		}
 	}
 	if !performRes.DeviceExists {
+		// Appservices create the devices of their users here instead of logging them in (MSC4190).
+		if device.AppserviceID != "" {
+			return createAppserviceDevice(req, userAPI, device, deviceID, payload.DisplayName)
+		}
 		return util.JSONResponse{
 			Code: http.StatusNotFound,
 			JSON: spec.Forbidden("device does not exist"),
@@ -194,31 +227,34 @@ func DeleteDeviceById(
 		sessionID = s
 	}
 
-	login, errRes := userInteractiveAuth.Verify(ctx, bodyBytes, device)
-	if errRes != nil {
-		switch data := errRes.JSON.(type) {
-		case auth.Challenge:
-			sessions.addDeviceToDelete(data.Session, deviceID)
-		default:
+	// Appservices act for registered users and need no re-authentication (MSC4190).
+	if device.AppserviceID == "" {
+		login, errRes := userInteractiveAuth.Verify(ctx, bodyBytes, device)
+		if errRes != nil {
+			switch data := errRes.JSON.(type) {
+			case auth.Challenge:
+				sessions.addDeviceToDelete(data.Session, deviceID)
+			default:
+			}
+			return *errRes
 		}
-		return *errRes
-	}
 
-	localpart, _, err := gomatrixserverlib.SplitID('@', device.UserID)
-	if err != nil {
-		util.GetLogger(ctx).WithError(err).Error("gomatrixserverlib.SplitID failed")
-		return util.JSONResponse{
-			Code: http.StatusInternalServerError,
-			JSON: spec.InternalServerError{},
+		localpart, _, err := gomatrixserverlib.SplitID('@', device.UserID)
+		if err != nil {
+			util.GetLogger(ctx).WithError(err).Error("gomatrixserverlib.SplitID failed")
+			return util.JSONResponse{
+				Code: http.StatusInternalServerError,
+				JSON: spec.InternalServerError{},
+			}
 		}
-	}
 
-	// make sure that the access token being used matches the login creds used for user interactive auth, else
-	// 1 compromised access token could be used to logout all devices.
-	if login.Username() != localpart && login.Username() != device.UserID {
-		return util.JSONResponse{
-			Code: 403,
-			JSON: spec.Forbidden("Cannot delete another user's device"),
+		// make sure that the access token being used matches the login creds used for user interactive auth, else
+		// 1 compromised access token could be used to logout all devices.
+		if login.Username() != localpart && login.Username() != device.UserID {
+			return util.JSONResponse{
+				Code: 403,
+				JSON: spec.Forbidden("Cannot delete another user's device"),
+			}
 		}
 	}
 
@@ -257,16 +293,18 @@ func DeleteDevices(
 	}
 	defer req.Body.Close() // nolint:errcheck
 
-	// initiate UIA
-	login, errRes := userInteractiveAuth.Verify(ctx, bodyBytes, device)
-	if errRes != nil {
-		return *errRes
-	}
+	// initiate UIA. Appservices act for registered users and need no re-authentication (MSC4190).
+	if device.AppserviceID == "" {
+		login, errRes := userInteractiveAuth.Verify(ctx, bodyBytes, device)
+		if errRes != nil {
+			return *errRes
+		}
 
-	if login.Username() != device.UserID {
-		return util.JSONResponse{
-			Code: http.StatusForbidden,
-			JSON: spec.Forbidden("unable to delete devices for other user"),
+		if login.Username() != device.UserID {
+			return util.JSONResponse{
+				Code: http.StatusForbidden,
+				JSON: spec.Forbidden("unable to delete devices for other user"),
+			}
 		}
 	}
 

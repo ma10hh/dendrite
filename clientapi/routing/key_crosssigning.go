@@ -69,6 +69,10 @@ func UploadCrossSigningDeviceKeys(
 		// we need to re-authenticate the user.
 		requireUIA = keysDiffer(existingMasterKey, keyResp, uploadReq, device.UserID)
 	}
+	// Appservices need no re-authentication to replace the keys of their users (MSC4190).
+	if device.AppserviceID != "" {
+		requireUIA = false
+	}
 
 	// While authentication is delegated the user approves a replacement at the provider, which
 	// then tells us (MAS: allow_cross_signing_reset) instead of asking for a password here.

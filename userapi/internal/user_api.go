@@ -560,18 +560,20 @@ func (a *UserInternalAPI) QueryAccountData(ctx context.Context, req *api.QueryAc
 }
 
 func (a *UserInternalAPI) QueryAccessToken(ctx context.Context, req *api.QueryAccessTokenRequest, res *api.QueryAccessTokenResponse) error {
-	if req.AppServiceUserID != "" {
-		appServiceDevice, err := a.queryAppServiceToken(ctx, req.AccessToken, req.AppServiceUserID)
-		if err != nil || appServiceDevice != nil {
-			if err != nil {
-				res.Err = err.Error()
-			}
-			res.Device = appServiceDevice
-
-			return nil
+	// An appservice that asserts no user acts as its sender_localpart user.
+	appServiceDevice, err := a.queryAppServiceToken(ctx, req.AccessToken, req.AppServiceUserID, req.AppServiceDeviceID)
+	if err != nil || appServiceDevice != nil {
+		var unknownDevice *api.ErrorUnknownDevice
+		if errors.As(err, &unknownDevice) {
+			res.UnknownDevice = true
+		} else if err != nil {
+			res.Err = err.Error()
 		}
-		// If the provided token wasn't an as_token (both err and appServiceDevice are nil), continue with normal auth.
+		res.Device = appServiceDevice
+
+		return nil
 	}
+	// If the provided token wasn't an as_token (both err and appServiceDevice are nil), continue with normal auth.
 	if a.DelegatedAuth != nil {
 		return a.queryDelegatedAuthToken(ctx, req.AccessToken, res)
 	}
@@ -605,7 +607,7 @@ func (a *UserInternalAPI) QueryAccountByLocalpart(ctx context.Context, req *api.
 
 // Return the appservice 'device' or nil if the token is not an appservice. Returns an error if there was a problem
 // creating a 'device'.
-func (a *UserInternalAPI) queryAppServiceToken(ctx context.Context, token, appServiceUserID string) (*api.Device, error) {
+func (a *UserInternalAPI) queryAppServiceToken(ctx context.Context, token, appServiceUserID, appServiceDeviceID string) (*api.Device, error) {
 	// Search for app service with given access_token
 	var appService *config.ApplicationService
 	for _, as := range a.AppServices {
@@ -641,14 +643,32 @@ func (a *UserInternalAPI) queryAppServiceToken(ctx context.Context, token, appSe
 		if err == nil && (account.AppServiceID == appService.ID || appService.IsInterestedInUserID(appServiceUserID)) {
 			// Set the userID of dummy device
 			dev.UserID = appServiceUserID
-			return &dev, nil
+			return a.assertAppServiceDevice(ctx, &dev, localpart, domain, appServiceDeviceID)
 		}
 		return nil, &api.ErrorForbidden{Message: "appservice has not registered this user"}
 	}
 
 	// AS is not masquerading as any user, so use AS's sender_localpart
-	dev.UserID = appService.SenderLocalpart
-	return &dev, nil
+	dev.UserID = userutil.MakeUserID(appService.SenderLocalpart, a.Config.Matrix.ServerName)
+	return a.assertAppServiceDevice(ctx, &dev, appService.SenderLocalpart, a.Config.Matrix.ServerName, appServiceDeviceID)
+}
+
+// assertAppServiceDevice lets an appservice speak as one of the devices of the user it acts as (MSC4326).
+// Without a device ID the appservice keeps its dummy device.
+func (a *UserInternalAPI) assertAppServiceDevice(
+	ctx context.Context, dev *api.Device, localpart string, domain spec.ServerName, deviceID string,
+) (*api.Device, error) {
+	if deviceID == "" {
+		return dev, nil
+	}
+	if _, err := a.DB.GetDeviceByID(ctx, localpart, domain, deviceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &api.ErrorUnknownDevice{}
+		}
+		return nil, err
+	}
+	dev.ID = deviceID
+	return dev, nil
 }
 
 // PerformAccountDeactivation deactivates the user's account, removing all ability for the user to login again.

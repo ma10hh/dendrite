@@ -198,3 +198,62 @@ func TestQueryAccessTokenMAS(t *testing.T) {
 		}
 	})
 }
+
+func TestQueryAccessTokenAppserviceDevice(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		userAPI, accountDB, close := MustMakeInternalAPI(t, apiTestOpts{}, dbType, nil)
+		defer close()
+		internalAPI := userAPI.(*internal.UserInternalAPI)
+		internalAPI.AppServices = []config.ApplicationService{{ID: "bridge", ASToken: "as_token", SenderLocalpart: "bridgebot"}}
+		ctx := context.Background()
+		for _, localpart := range []string{"bridgebot", "ghost"} {
+			if _, err := accountDB.CreateAccount(ctx, localpart, serverName, "", "bridge", api.AccountTypeAppService); err != nil {
+				t.Fatal(err)
+			}
+		}
+		query := func(userID, deviceID string) api.QueryAccessTokenResponse {
+			t.Helper()
+			var res api.QueryAccessTokenResponse
+			if err := userAPI.QueryAccessToken(ctx, &api.QueryAccessTokenRequest{
+				AccessToken: "as_token", AppServiceUserID: userID, AppServiceDeviceID: deviceID,
+			}, &res); err != nil {
+				t.Fatal(err)
+			}
+			return res
+		}
+
+		// Without a device ID the appservice has its placeholder device.
+		if res := query("@ghost:example.com", ""); res.Device == nil || res.Device.ID != "AS_Device" || res.Device.UserID != "@ghost:example.com" {
+			t.Errorf("got %+v err %q", res.Device, res.Err)
+		}
+		// The sender is a full user ID.
+		if res := query("", ""); res.Device == nil || res.Device.UserID != "@bridgebot:example.com" || res.Device.AppserviceID != "bridge" {
+			t.Errorf("got %+v", res.Device)
+		}
+
+		// A device that does not exist cannot be asserted.
+		if res := query("@ghost:example.com", "GHOSTDEV"); res.Device != nil || !res.UnknownDevice {
+			t.Errorf("got device %+v unknown %v, want an unknown device", res.Device, res.UnknownDevice)
+		}
+		if res := query("", "BOTDEV"); res.Device != nil || !res.UnknownDevice {
+			t.Errorf("sender: got device %+v unknown %v, want an unknown device", res.Device, res.UnknownDevice)
+		}
+
+		for _, d := range []struct{ localpart, id string }{{"ghost", "GHOSTDEV"}, {"bridgebot", "BOTDEV"}} {
+			id := d.id
+			if _, err := accountDB.CreateDevice(ctx, d.localpart, serverName, &id, "unused-"+d.id, nil, "", ""); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if res := query("@ghost:example.com", "GHOSTDEV"); res.Device == nil || res.Device.ID != "GHOSTDEV" || res.Device.AppserviceID != "bridge" || res.Device.UserID != "@ghost:example.com" {
+			t.Errorf("got %+v", res.Device)
+		}
+		if res := query("", "BOTDEV"); res.Device == nil || res.Device.ID != "BOTDEV" || res.Device.UserID != "@bridgebot:example.com" {
+			t.Errorf("sender: got %+v", res.Device)
+		}
+		// One user's device cannot be asserted for another user.
+		if res := query("@ghost:example.com", "BOTDEV"); res.Device != nil || !res.UnknownDevice {
+			t.Errorf("got device %+v unknown %v, want an unknown device", res.Device, res.UnknownDevice)
+		}
+	})
+}

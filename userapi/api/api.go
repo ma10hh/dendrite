@@ -265,12 +265,16 @@ type QueryAccessTokenRequest struct {
 	// optional user ID, valid only if the token is an appservice.
 	// https://matrix.org/docs/spec/application_service/r0.1.2#using-sync-and-events
 	AppServiceUserID string
+	// optional device ID, valid only if the token is an appservice (MSC4326).
+	AppServiceDeviceID string
 }
 
 // QueryAccessTokenResponse is the response for QueryAccessToken
 type QueryAccessTokenResponse struct {
 	Device *Device
 	Err    string // e.g ErrorForbidden
+	// UnknownDevice is set if an appservice asserted a device that does not exist (MSC4326).
+	UnknownDevice bool
 }
 
 // QueryAccountDataRequest is the request for QueryAccountData
@@ -488,6 +492,13 @@ type OpenIDTokenAttributes struct {
 // UserInfo is for returning information about the user an OpenID token was issued for
 type UserInfo struct {
 	Sub string // The Matrix user's ID who generated the token
+}
+
+// ErrorUnknownDevice is an error indicating that an appservice asserted a device that does not exist.
+type ErrorUnknownDevice struct{}
+
+func (e *ErrorUnknownDevice) Error() string {
+	return "unknown device"
 }
 
 // ErrorForbidden is an error indicating that the supplied access token is forbidden

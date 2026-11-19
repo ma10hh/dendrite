@@ -1,6 +1,7 @@
 package routing
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,7 +49,7 @@ func TestDelegatedAuthDisabledEndpoints(t *testing.T) {
 
 func TestDelegatedAuthMiddleware(t *testing.T) {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusTeapot) })
-	h := delegatedAuthMiddleware(next)
+	h := delegatedAuthMiddleware(&config.ClientAPI{})(next)
 
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/_matrix/client/v3/login", strings.NewReader("{}")))
@@ -123,5 +124,68 @@ func TestMASSharedSecretIsChecked(t *testing.T) {
 	h.ServeHTTP(rec, req)
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("empty secret accepted: got %d", rec.Code)
+	}
+}
+
+func TestDelegatedAuthMiddlewareForAppservices(t *testing.T) {
+	cfg := &config.ClientAPI{Derived: &config.Derived{ApplicationServices: []config.ApplicationService{{ID: "bridge", ASToken: "as_token"}}}}
+	var seenBody string
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		seenBody = string(b)
+		w.WriteHeader(http.StatusTeapot)
+	})
+	h := delegatedAuthMiddleware(cfg)(next)
+	register := func(body string) string {
+		return `{"type": "m.login.application_service", "username": "bot", ` + body + `}`
+	}
+
+	for _, tc := range []struct {
+		name, method, path, body, token string
+		wantCode                        int
+		wantErrcode                     string
+	}{
+		{"user cannot log in", http.MethodPost, "/login", "{}", "", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"appservice cannot log in", http.MethodPost, "/login", "{}", "as_token", http.StatusBadRequest, "M_APPSERVICE_LOGIN_UNSUPPORTED"},
+		{"unknown token is no appservice", http.MethodPost, "/login", "{}", "other", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"user cannot register", http.MethodPost, "/register", register(`"inhibit_login": true`), "", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"appservice registers without login", http.MethodPost, "/register", register(`"inhibit_login": true`), "as_token", http.StatusTeapot, ""},
+		{"appservice must inhibit login", http.MethodPost, "/register", register(`"x": 1`), "as_token", http.StatusBadRequest, "M_APPSERVICE_LOGIN_UNSUPPORTED"},
+		{"appservice cannot ask for a login", http.MethodPost, "/register", register(`"inhibit_login": false`), "as_token", http.StatusBadRequest, "M_APPSERVICE_LOGIN_UNSUPPORTED"},
+		{"appservice register needs the appservice type", http.MethodPost, "/register", `{"inhibit_login": true}`, "as_token", http.StatusBadRequest, "M_APPSERVICE_LOGIN_UNSUPPORTED"},
+		{"register sub paths stay closed", http.MethodGet, "/register/available", "", "as_token", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"user cannot delete a device", http.MethodDelete, "/devices/ABC", "", "", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"appservice deletes a device", http.MethodDelete, "/devices/ABC", "{}", "as_token", http.StatusTeapot, ""},
+		{"appservice deletes devices", http.MethodPost, "/delete_devices", `{"devices": ["A"]}`, "as_token", http.StatusTeapot, ""},
+		{"appservice cannot log out", http.MethodPost, "/logout", "{}", "as_token", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"appservice cannot change passwords", http.MethodPost, "/account/password", "{}", "as_token", http.StatusNotFound, "M_UNRECOGNIZED"},
+		{"anything else is not touched", http.MethodGet, "/account/whoami", "", "", http.StatusTeapot, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			seenBody = ""
+			req := httptest.NewRequest(tc.method, "/_matrix/client/v3"+tc.path, strings.NewReader(tc.body))
+			if tc.token != "" {
+				req.Header.Set("Authorization", "Bearer "+tc.token)
+			}
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.wantCode {
+				t.Fatalf("got %d %s, want %d", rec.Code, rec.Body, tc.wantCode)
+			}
+			if tc.wantErrcode != "" && !strings.Contains(rec.Body.String(), tc.wantErrcode) {
+				t.Errorf("got %s, want error code %s", rec.Body, tc.wantErrcode)
+			}
+			if tc.wantCode == http.StatusTeapot && seenBody != tc.body {
+				t.Errorf("the handler saw body %q, want %q", seenBody, tc.body)
+			}
+		})
+	}
+
+	// The token is also accepted as query parameter.
+	req := httptest.NewRequest(http.MethodDelete, "/_matrix/client/v3/devices/ABC?access_token=as_token", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTeapot {
+		t.Errorf("access_token query parameter: got %d", rec.Code)
 	}
 }
