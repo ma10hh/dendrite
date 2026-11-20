@@ -359,3 +359,21 @@ func (r *Admin) AdminQueryEmptyRooms(ctx context.Context) ([]string, error) {
 func (r *Admin) AdminQueryAllRooms(ctx context.Context) ([]string, error) {
 	return r.DB.AllRoomIDs(ctx)
 }
+
+// PerformAdminBlockRoom blocks a room, or lifts the block. The room need not exist here.
+func (r *Admin) PerformAdminBlockRoom(ctx context.Context, roomID string, blocked bool) error {
+	if _, err := spec.NewRoomID(roomID); err != nil {
+		return fmt.Errorf("invalid room ID: %w", err)
+	}
+	return r.DB.SetRoomBlocked(ctx, roomID, blocked)
+}
+
+// QueryRoomBlocked says whether local users may not join the room.
+func (r *Admin) QueryRoomBlocked(ctx context.Context, roomID string) (bool, error) {
+	return r.DB.IsRoomBlocked(ctx, roomID)
+}
+
+// errRoomBlocked is what users are told when they try to join a blocked room.
+func errRoomBlocked() error {
+	return api.ErrNotAllowed{Err: fmt.Errorf("This room has been blocked on this server")}
+}

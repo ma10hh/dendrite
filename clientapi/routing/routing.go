@@ -245,6 +245,11 @@ func Setup(
 			return SynapseAdminRoomState(req, rsAPI)
 		}),
 	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/rooms/{roomId}/block",
+		httputil.MakeAdminAPI("synapse_admin_room_block", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRoomBlock(req, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodPut, http.MethodOptions)
 	synapseAdminRouter.Handle("/admin/v2/rooms/{roomId}",
 		httputil.MakeAdminAPI("synapse_admin_delete_room", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return SynapseAdminDeleteRoom(req, rsAPI, true)

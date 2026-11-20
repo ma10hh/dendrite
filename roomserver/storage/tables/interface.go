@@ -303,3 +303,10 @@ type PartialStateEvents interface {
 	SelectPartialStateEvents(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) ([]types.PartialStateEvent, error)
 	DeletePartialStateEvents(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) error
 }
+
+// BlockedRooms are the rooms that local users may not join.
+type BlockedRooms interface {
+	InsertBlockedRoom(ctx context.Context, txn *sql.Tx, roomID string) error
+	DeleteBlockedRoom(ctx context.Context, txn *sql.Tx, roomID string) error
+	IsRoomBlocked(ctx context.Context, txn *sql.Tx, roomID string) (bool, error)
+}

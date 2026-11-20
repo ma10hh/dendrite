@@ -88,6 +88,11 @@ func (r *Knocker) performKnock(ctx context.Context, req *rsAPI.PerformKnockReque
 	if err != nil {
 		return "", nil, rsAPI.ErrInvalidID{Err: fmt.Errorf("room ID %q is invalid: %w", req.RoomIDOrAlias, err)}
 	}
+	if blocked, berr := r.DB.IsRoomBlocked(ctx, roomID.String()); berr != nil {
+		return "", nil, berr
+	} else if blocked {
+		return "", nil, errRoomBlocked()
+	}
 
 	// The servers to ask for the room do not include this one. The server of the room is always one to ask.
 	servers := make([]spec.ServerName, 0, len(req.ServerNames)+1)

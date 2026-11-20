@@ -133,9 +133,7 @@ func TestSynapseAdminRooms(t *testing.T) {
 		})
 
 		t.Run("delete", func(t *testing.T) {
-			code, _ := call(admin, http.MethodDelete, "/_synapse/admin/v2/rooms/"+beta.ID, map[string]any{"block": true})
-			assert.Equal(t, http.StatusBadRequest, code, "blocking is not supported")
-			code, _ = call(admin, http.MethodDelete, "/_synapse/admin/v2/rooms/"+beta.ID, map[string]any{"message": "bye"})
+			code, _ := call(admin, http.MethodDelete, "/_synapse/admin/v2/rooms/"+beta.ID, map[string]any{"message": "bye"})
 			assert.Equal(t, http.StatusBadRequest, code)
 
 			code, res := call(admin, http.MethodDelete, "/_synapse/admin/v2/rooms/"+beta.ID, map[string]any{})
@@ -159,6 +157,56 @@ func TestSynapseAdminRooms(t *testing.T) {
 			assert.Contains(t, res.Get("kicked_users").String(), bob.ID)
 			code, _ = call(admin, http.MethodDelete, "/_synapse/admin/v1/rooms/"+alpha.ID, nil)
 			assert.Equal(t, http.StatusNotFound, code)
+		})
+
+		t.Run("block", func(t *testing.T) {
+			join := func(roomID string) int {
+				t.Helper()
+				req := test.NewRequest(t, http.MethodPost, "/_matrix/client/v3/join/"+roomID, test.WithJSONBody(t, map[string]any{}))
+				req.Header.Set("Authorization", "Bearer "+tokens[bob].accessToken)
+				rec := httptest.NewRecorder()
+				routers.Client.ServeHTTP(rec, req)
+				return rec.Code
+			}
+			knock := func(roomID string) int {
+				t.Helper()
+				req := test.NewRequest(t, http.MethodPost, "/_matrix/client/v3/knock/"+roomID, test.WithJSONBody(t, map[string]any{}))
+				req.Header.Set("Authorization", "Bearer "+tokens[bob].accessToken)
+				rec := httptest.NewRecorder()
+				routers.Client.ServeHTTP(rec, req)
+				return rec.Code
+			}
+
+			code, res := call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", nil)
+			require.Equal(t, http.StatusOK, code, res.Raw)
+			assert.False(t, res.Get("block").Bool())
+			code, _ = call(bob, http.MethodPut, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", map[string]any{"block": true})
+			assert.Equal(t, http.StatusForbidden, code)
+			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", map[string]any{"block": "yes"})
+			assert.Equal(t, http.StatusBadRequest, code)
+
+			// The room was deleted above, so this blocks a room that is not known here.
+			code, res = call(admin, http.MethodPut, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", map[string]any{"block": true})
+			require.Equal(t, http.StatusOK, code, res.Raw)
+			assert.True(t, res.Get("block").Bool())
+			_, res = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", nil)
+			assert.True(t, res.Get("block").Bool())
+			assert.Equal(t, http.StatusForbidden, join(alpha.ID))
+			assert.Equal(t, http.StatusForbidden, knock(alpha.ID))
+
+			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", map[string]any{"block": false})
+			require.Equal(t, http.StatusOK, code)
+			_, res = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/"+alpha.ID+"/block", nil)
+			assert.False(t, res.Get("block").Bool())
+			assert.NotEqual(t, http.StatusForbidden, join(alpha.ID), "the room is gone, but it is no longer blocked")
+
+			// Deleting with block blocks a room that is not known here too.
+			other := "!neverseen:test"
+			code, res = call(admin, http.MethodDelete, "/_synapse/admin/v1/rooms/"+other, map[string]any{"block": true})
+			require.Equal(t, http.StatusOK, code, res.Raw)
+			assert.Equal(t, http.StatusForbidden, join(other))
+			_, res = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/"+other+"/block", nil)
+			assert.True(t, res.Get("block").Bool())
 		})
 	})
 }

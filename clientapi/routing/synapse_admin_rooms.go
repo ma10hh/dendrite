@@ -380,8 +380,9 @@ func rememberRoomDeletion(id string, d *roomDeletion) {
 }
 
 // SynapseAdminDeleteRoom implements DELETE /_synapse/admin/v1/rooms/{roomId} and /v2/rooms/{roomId}: the local users
-// leave the room and, unless purge is false, everything about the room is removed from this server. Blocking the
-// room, sending a message to its users and moving them to a new room are not supported.
+// leave the room and, unless purge is false, everything about the room is removed from this server, and with block
+// the room is blocked as well, also if it is unknown here. Sending a message to its users and moving them to a new room
+// are not supported.
 func SynapseAdminDeleteRoom(req *http.Request, rsAPI roomserverAPI.ClientRoomserverAPI, v2 bool) util.JSONResponse {
 	id, errResp := adminRoomID(req)
 	if errResp != nil {
@@ -400,21 +401,29 @@ func SynapseAdminDeleteRoom(req *http.Request, rsAPI roomserverAPI.ClientRoomser
 			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.NotJSON("The request body could not be decoded: " + err.Error())}
 		}
 	}
-	if body.Block {
-		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("Blocking a room is not supported")}
-	}
 	if body.NewRoomUser != "" || body.Message != "" || body.RoomName != "" {
 		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("Sending a message or moving the users to a new room is not supported")}
 	}
 	purge := body.Purge == nil || *body.Purge
 
 	result := &roomDeletion{Status: "complete", RoomID: id, KickedUsers: []string{}, FailedToKick: []string{}, LocalAliases: []string{}}
+	// The block goes in first so that nobody joins the room while it is being emptied.
+	if body.Block {
+		if err := rsAPI.PerformAdminBlockRoom(req.Context(), id, true); err != nil {
+			util.GetLogger(req.Context()).WithError(err).WithField("room_id", id).Error("Failed to block room")
+			return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+		}
+	}
 	affected, err := rsAPI.PerformAdminEvacuateRoom(req.Context(), id)
 	switch err.(type) {
 	case nil:
 		result.KickedUsers = append(result.KickedUsers, affected...)
 	case eventutil.ErrRoomNoExists:
-		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Room not found")}
+		// A room that is not known here can still be blocked.
+		if !body.Block {
+			return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Room not found")}
+		}
+		purge = false
 	default:
 		util.GetLogger(req.Context()).WithError(err).WithField("room_id", id).Error("Failed to evacuate room")
 		result.Status, result.Error = "failed", err.Error()
@@ -468,4 +477,35 @@ func SynapseAdminRoomDeleteStatus(req *http.Request) util.JSONResponse {
 		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("No delete status found")}
 	}
 	return util.JSONResponse{Code: http.StatusOK, JSON: map[string]any{"results": results}}
+}
+
+// SynapseAdminRoomBlock implements GET and PUT /_synapse/admin/v1/rooms/{roomId}/block. The room need not exist on this
+// server. Unlike Synapse, GET does not say which admin blocked the room.
+func SynapseAdminRoomBlock(req *http.Request, rsAPI roomserverAPI.ClientRoomserverAPI) util.JSONResponse {
+	id, errResp := adminRoomID(req)
+	if errResp != nil {
+		return *errResp
+	}
+	if req.Method == http.MethodPut {
+		var body struct {
+			Block *bool `json:"block"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.NotJSON("The request body could not be decoded: " + err.Error())}
+		}
+		if body.Block == nil {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.BadJSON("Param 'block' must be a boolean")}
+		}
+		if err := rsAPI.PerformAdminBlockRoom(req.Context(), id, *body.Block); err != nil {
+			util.GetLogger(req.Context()).WithError(err).Error("PerformAdminBlockRoom failed")
+			return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+		}
+		return util.JSONResponse{Code: http.StatusOK, JSON: map[string]bool{"block": *body.Block}}
+	}
+	blocked, err := rsAPI.QueryRoomBlocked(req.Context(), id)
+	if err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("QueryRoomBlocked failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	return util.JSONResponse{Code: http.StatusOK, JSON: map[string]bool{"block": blocked}}
 }

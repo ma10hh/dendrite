@@ -217,6 +217,7 @@ type UserRoomKeys interface {
 }
 
 type RoomDatabase interface {
+	IsRoomBlocked(ctx context.Context, roomID string) (bool, error)
 	PartialState
 	EventDatabase
 	UserRoomKeys
@@ -276,6 +277,8 @@ type PartialState interface {
 // AllRooms lists the rooms of the server.
 type AllRooms interface {
 	AllRoomIDs(ctx context.Context) ([]string, error)
+	SetRoomBlocked(ctx context.Context, roomID string, blocked bool) error
+	IsRoomBlocked(ctx context.Context, roomID string) (bool, error)
 }
 
 type ReportedEvents interface {

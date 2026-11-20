@@ -305,6 +305,19 @@ func handleInviteResult(ctx context.Context, inviteEvent gomatrixserverlib.PDU, 
 		}
 	}
 
+	if blocked, blockErr := rsAPI.QueryRoomBlocked(ctx, inviteEvent.RoomID().String()); blockErr != nil {
+		util.GetLogger(ctx).WithError(blockErr).Error("QueryRoomBlocked failed")
+		return nil, &util.JSONResponse{
+			Code: http.StatusInternalServerError,
+			JSON: spec.InternalServerError{},
+		}
+	} else if blocked {
+		return nil, &util.JSONResponse{
+			Code: http.StatusForbidden,
+			JSON: spec.Forbidden("This room has been blocked on this server"),
+		}
+	}
+
 	headeredInvite := &types.HeaderedEvent{PDU: inviteEvent}
 	if err = rsAPI.HandleInvite(ctx, headeredInvite); err != nil {
 		util.GetLogger(ctx).WithError(err).Error("HandleInvite failed")

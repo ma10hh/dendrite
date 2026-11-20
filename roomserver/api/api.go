@@ -253,6 +253,10 @@ type ClientRoomserverAPI interface {
 	PerformAdminDownloadState(ctx context.Context, roomID, userID string, serverName spec.ServerName) error
 	AdminQueryEmptyRooms(ctx context.Context) ([]string, error)
 	AdminQueryAllRooms(ctx context.Context) ([]string, error)
+	// PerformAdminBlockRoom stops local users from joining, knocking on and being invited to a room, or lifts that.
+	PerformAdminBlockRoom(ctx context.Context, roomID string, blocked bool) error
+	// QueryRoomBlocked says whether the room is blocked.
+	QueryRoomBlocked(ctx context.Context, roomID string) (bool, error)
 	PerformPeek(ctx context.Context, req *PerformPeekRequest) (roomID string, err error)
 	PerformUnpeek(ctx context.Context, roomID, userID, deviceID string) error
 	PerformInvite(ctx context.Context, req *PerformInviteRequest) error
@@ -334,6 +338,7 @@ type FederationRoomserverAPI interface {
 	PerformBackfill(ctx context.Context, req *PerformBackfillRequest, res *PerformBackfillResponse) error
 
 	IsKnownRoom(ctx context.Context, roomID spec.RoomID) (bool, error)
+	QueryRoomBlocked(ctx context.Context, roomID string) (bool, error)
 	StateQuerier() gomatrixserverlib.StateQuerier
 }
 

@@ -161,6 +161,11 @@ func (r *Joiner) performJoinRoomByID(
 	if err != nil {
 		return "", "", rsAPI.ErrInvalidID{Err: fmt.Errorf("room ID %q is invalid: %w", req.RoomIDOrAlias, err)}
 	}
+	if blocked, berr := r.DB.IsRoomBlocked(ctx, roomID.String()); berr != nil {
+		return "", "", berr
+	} else if blocked {
+		return "", "", errRoomBlocked()
+	}
 
 	// Force a federated join if we aren't in the room and we've been
 	// given some server names to try joining by.

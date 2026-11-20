@@ -47,6 +47,7 @@ type Database struct {
 	PublishedTable     tables.Published
 	PartialStateTable  tables.PartialStateRooms
 	PartialStateEvents tables.PartialStateEvents
+	BlockedRoomsTable  tables.BlockedRooms
 	Purge              tables.Purge
 	UserRoomKeyTable   tables.UserRoomKeys
 	GetRoomUpdaterFn   func(ctx context.Context, roomInfo *types.RoomInfo) (*RoomUpdater, error)
@@ -2326,4 +2327,19 @@ func (d *Database) ForgetPartialStateEvents(ctx context.Context, roomNID types.R
 // AllRoomIDs returns the IDs of all the rooms this server has events of.
 func (d *Database) AllRoomIDs(ctx context.Context) ([]string, error) {
 	return d.RoomsTable.SelectAllRoomIDs(ctx, nil)
+}
+
+// SetRoomBlocked blocks a room, or lifts the block.
+func (d *Database) SetRoomBlocked(ctx context.Context, roomID string, blocked bool) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		if blocked {
+			return d.BlockedRoomsTable.InsertBlockedRoom(ctx, txn, roomID)
+		}
+		return d.BlockedRoomsTable.DeleteBlockedRoom(ctx, txn, roomID)
+	})
+}
+
+// IsRoomBlocked says whether local users may not join the room.
+func (d *Database) IsRoomBlocked(ctx context.Context, roomID string) (bool, error) {
+	return d.BlockedRoomsTable.IsRoomBlocked(ctx, nil, roomID)
 }
