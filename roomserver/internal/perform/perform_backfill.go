@@ -9,6 +9,7 @@ package perform
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -499,6 +500,16 @@ FindSuccessor:
 			servers = append([]spec.ServerName{server}, servers...)
 		} else { // insert at the back
 			servers = append(servers, server)
+		}
+	}
+	// While the room has partial state, the memberships that name the servers are mostly missing: the servers the join
+	// was made through, and that were in the room, are the ones to ask.
+	if partial, perr := b.db.PartialStateOfRoom(ctx, info.RoomNID); perr == nil && partial != nil {
+		for _, name := range partial.Servers {
+			server := spec.ServerName(name)
+			if !b.isLocalServerName(server) && !slices.Contains(servers, server) {
+				servers = append([]spec.ServerName{server}, servers...)
+			}
 		}
 	}
 	if len(servers) > maxBackfillServers {

@@ -94,6 +94,19 @@ func (r *Inputer) addMembersInTransaction(ctx context.Context, input *api.InputR
 	if err != nil {
 		return 0, fmt.Errorf("updater.PartialStateEvents: %w", err)
 	}
+	// The join event has the state the other server gave, without the memberships, as the state before it. Servers to
+	// backfill from are taken from it, so it gets them like the events after it.
+	if joinNIDs, jerr := r.DB.EventNIDs(ctx, []string{partial.JoinEventID}); jerr == nil {
+		if join, ok := joinNIDs[partial.JoinEventID]; ok && join.EventNID != 0 {
+			known := false
+			for _, e := range recorded {
+				known = known || e.EventNID == join.EventNID
+			}
+			if !known {
+				recorded = append([]types.PartialStateEvent{{EventNID: join.EventNID}}, recorded...)
+			}
+		}
+	}
 	if err = r.recheckPartialStateEvents(ctx, updater, roomInfo, members, recorded); err != nil {
 		return 0, fmt.Errorf("rechecking the events of the partial state: %w", err)
 	}

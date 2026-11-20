@@ -25,6 +25,7 @@ import (
 	"github.com/element-hq/dendrite/roomserver"
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/internal"
+	"github.com/element-hq/dendrite/roomserver/internal/helpers"
 	"github.com/element-hq/dendrite/roomserver/storage"
 	"github.com/element-hq/dendrite/roomserver/types"
 	rstypes "github.com/element-hq/dendrite/roomserver/types"
@@ -316,6 +317,20 @@ func TestPartialStateEventsAreChecked(t *testing.T) {
 		recorded, err = db.PartialStateEventsOfRoom(ctx, info.RoomNID)
 		require.NoError(t, err)
 		assert.Empty(t, recorded, "the notes are gone")
+
+		// Backfilling past the join picks the servers to ask from the members in the state before the join event, which
+		// is not a latest event any more here.
+		joinNIDs, err := db.EventNIDs(ctx, []string{join.EventID()})
+		require.NoError(t, err)
+		stateBeforeJoin, err := helpers.StateBeforeEvent(ctx, db, info, joinNIDs[join.EventID()].EventNID, rsAPI)
+		require.NoError(t, err)
+		joinedBefore, err := helpers.GetMembershipsAtState(ctx, db, info, stateBeforeJoin, true)
+		require.NoError(t, err)
+		var joinedIDs []string
+		for _, ev := range joinedBefore {
+			joinedIDs = append(joinedIDs, string(ev.SenderID()))
+		}
+		assert.Contains(t, joinedIDs, yUser.ID, "the state before the join has the members now")
 
 		// The state before the event now has the member who sent it.
 		res := api.QueryStateAfterEventsResponse{}
