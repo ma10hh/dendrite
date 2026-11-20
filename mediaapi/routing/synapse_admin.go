@@ -7,16 +7,13 @@ package routing
 
 import (
 	"net/http"
-	"path/filepath"
 	"strconv"
 
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/matrix-org/util"
-	log "github.com/sirupsen/logrus"
 
 	"github.com/element-hq/dendrite/internal/httputil"
-	"github.com/element-hq/dendrite/mediaapi/fileutils"
 	"github.com/element-hq/dendrite/mediaapi/storage"
 	"github.com/element-hq/dendrite/mediaapi/types"
 	"github.com/element-hq/dendrite/setup/config"
@@ -103,16 +100,7 @@ func (a *mediaAdmin) quarantineUser(req *http.Request) util.JSONResponse {
 
 // remove deletes the media, and its file and thumbnails if no other media uses them.
 func (a *mediaAdmin) remove(req *http.Request, id types.MediaID) (bool, error) {
-	meta, inUse, err := a.db.DeleteMedia(req.Context(), id, a.cfg.Matrix.ServerName)
-	if err != nil || meta == nil {
-		return false, err
-	}
-	if !inUse {
-		if path, perr := fileutils.GetPathFromBase64Hash(meta.Base64Hash, a.cfg.AbsBasePath); perr == nil {
-			fileutils.RemoveDir(types.Path(filepath.Dir(path)), log.WithField("media_id", id))
-		}
-	}
-	return true, nil
+	return removeMedia(req.Context(), a.cfg, a.db, id, a.cfg.Matrix.ServerName)
 }
 
 func (a *mediaAdmin) removeAll(req *http.Request, ids []types.MediaID) util.JSONResponse {
@@ -233,6 +221,10 @@ func (a *mediaAdmin) listUser(req *http.Request) util.JSONResponse {
 	out := make([]entry, 0, len(media))
 	for _, m := range media {
 		e := entry{MediaID: string(m.MediaID), MediaType: string(m.ContentType), MediaLength: int64(m.FileSizeBytes), UploadName: string(m.UploadName), CreatedTS: int64(m.CreationTimestamp)}
+		if m.LastAccessTimestamp > 0 {
+			last := int64(m.LastAccessTimestamp)
+			e.LastAccessTS = &last
+		}
 		if m.Quarantined {
 			admin := "admin"
 			e.QuarantinedBy = &admin

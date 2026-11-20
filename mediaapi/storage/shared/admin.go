@@ -44,12 +44,17 @@ func (d *Database) SetUserMediaQuarantined(ctx context.Context, userID string, q
 	return affected, err
 }
 
+// lastUsed is when the media was last downloaded, or uploaded if it never was.
+const lastUsed = "(CASE WHEN last_access_ts > creation_ts THEN last_access_ts ELSE creation_ts END)"
+
+const mediaColumns = "media_id, media_origin, content_type, file_size_bytes, creation_ts, upload_name, base64hash, user_id, quarantined, last_access_ts"
+
 var mediaOrderColumns = map[string]string{
 	"":                     "creation_ts",
 	"media_id":             "media_id",
 	"upload_name":          "upload_name",
 	"created_ts":           "creation_ts",
-	"last_access_ts":       "creation_ts",
+	"last_access_ts":       lastUsed,
 	"media_length":         "file_size_bytes",
 	"media_type":           "content_type",
 	"quarantined_by":       "quarantined",
@@ -73,7 +78,7 @@ func (d *Database) ListUserMedia(
 		direction = "DESC"
 	}
 	rows, err := d.DB.QueryContext(ctx,
-		"SELECT media_id, media_origin, content_type, file_size_bytes, creation_ts, upload_name, base64hash, user_id, quarantined"+
+		"SELECT "+mediaColumns+
 			" FROM mediaapi_media_repository WHERE user_id = $1 ORDER BY "+column+" "+direction+", media_id ASC LIMIT $2 OFFSET $3",
 		userID, limit, from)
 	if err != nil {
@@ -84,17 +89,17 @@ func (d *Database) ListUserMedia(
 	return out, total, err
 }
 
-// MediaToDelete returns the media of this server that is older than the timestamp (in ms) and larger than the size,
+// MediaToDelete returns the media of this server that was last used before the timestamp (in ms) and larger than the size,
 // if they are not zero.
 func (d *Database) MediaToDelete(ctx context.Context, origin spec.ServerName, beforeTS spec.Timestamp, largerThan int64) ([]types.MediaMetadata, error) {
-	query := "SELECT media_id, media_origin, content_type, file_size_bytes, creation_ts, upload_name, base64hash, user_id, quarantined" +
-		" FROM mediaapi_media_repository WHERE media_origin = $1 AND creation_ts < $2"
+	query := "SELECT " + mediaColumns +
+		" FROM mediaapi_media_repository WHERE media_origin = $1 AND " + lastUsed + " < $2"
 	args := []any{origin, int64(beforeTS)}
 	if largerThan > 0 {
 		query += " AND file_size_bytes > $3"
 		args = append(args, largerThan)
 	}
-	rows, err := d.DB.QueryContext(ctx, query+" ORDER BY creation_ts ASC", args...)
+	rows, err := d.DB.QueryContext(ctx, query+" ORDER BY "+lastUsed+" ASC", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +111,7 @@ func scanMedia(rows *sql.Rows) ([]types.MediaMetadata, error) {
 	var out []types.MediaMetadata
 	for rows.Next() {
 		var m types.MediaMetadata
-		if err := rows.Scan(&m.MediaID, &m.Origin, &m.ContentType, &m.FileSizeBytes, &m.CreationTimestamp, &m.UploadName, &m.Base64Hash, &m.UserID, &m.Quarantined); err != nil {
+		if err := rows.Scan(&m.MediaID, &m.Origin, &m.ContentType, &m.FileSizeBytes, &m.CreationTimestamp, &m.UploadName, &m.Base64Hash, &m.UserID, &m.Quarantined, &m.LastAccessTimestamp); err != nil {
 			return nil, err
 		}
 		out = append(out, m)
@@ -115,7 +120,7 @@ func scanMedia(rows *sql.Rows) ([]types.MediaMetadata, error) {
 }
 
 // DeleteMedia removes the metadata of media and of its thumbnails, and says whether the file the media was made of is
-// still used by other media: if it is not, the caller removes the file.
+// still used by other media, of any origin as they share the file by its hash: if it is not, the caller removes the file.
 func (d *Database) DeleteMedia(ctx context.Context, mediaID types.MediaID, origin spec.ServerName) (meta *types.MediaMetadata, fileInUse bool, err error) {
 	meta, err = d.GetMediaMetadata(ctx, mediaID, origin)
 	if err != nil || meta == nil {
@@ -129,7 +134,7 @@ func (d *Database) DeleteMedia(ctx context.Context, mediaID types.MediaID, origi
 			return derr
 		}
 		var others int
-		if derr := txn.QueryRowContext(ctx, "SELECT COUNT(*) FROM mediaapi_media_repository WHERE base64hash = $1 AND media_origin = $2", meta.Base64Hash, origin).Scan(&others); derr != nil {
+		if derr := txn.QueryRowContext(ctx, "SELECT COUNT(*) FROM mediaapi_media_repository WHERE base64hash = $1", meta.Base64Hash).Scan(&others); derr != nil {
 			return derr
 		}
 		fileInUse = others > 0

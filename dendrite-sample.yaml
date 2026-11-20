@@ -342,6 +342,21 @@ media_api:
     # Ranges to allow although they would be refused, for servers in the network that are safe to preview.
     ip_range_allowlist: []
 
+  # How much media one local user may have stored at the same time, in bytes. An upload that would go above it is
+  # refused with M_RESOURCE_LIMIT_EXCEEDED. 0 is unlimited. The check is not atomic: uploads that run at the same
+  # time can go a little over.
+  max_user_storage_bytes: 0
+
+  # Deletes media that nobody has downloaded for a while. A lifetime counts from the last download, or from the
+  # upload if there was none. 0 keeps the media for ever. Quarantined media is never deleted.
+  retention:
+    # For media that users of this server uploaded. It cannot be fetched again once it is deleted.
+    local_media_lifetime: 0s
+    # For copies of media of other servers, which are fetched again when they are asked for.
+    remote_media_lifetime: 0s
+    # The time between two runs.
+    interval: 1h
+
 # Configuration for enabling experimental MSCs on this homeserver.
 mscs:
   mscs:

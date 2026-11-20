@@ -14,6 +14,7 @@ import (
 	"github.com/element-hq/dendrite/mediaapi/routing"
 	"github.com/element-hq/dendrite/mediaapi/storage"
 	"github.com/element-hq/dendrite/setup/config"
+	"github.com/element-hq/dendrite/setup/process"
 	userapi "github.com/element-hq/dendrite/userapi/api"
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/fclient"
@@ -21,6 +22,7 @@ import (
 
 // AddPublicRoutes sets up and registers HTTP handlers for the MediaAPI component.
 func AddPublicRoutes(
+	processCtx *process.ProcessContext,
 	routers httputil.Routers,
 	cm *sqlutil.Connections,
 	cfg *config.Dendrite,
@@ -33,6 +35,8 @@ func AddPublicRoutes(
 	if err != nil {
 		logrus.WithError(err).Panicf("failed to connect to media db")
 	}
+
+	routing.StartRetention(processCtx.Context(), &cfg.MediaAPI, mediaDB)
 
 	routing.Setup(
 		routers, cfg, mediaDB, userAPI, client, fedClient, keyRing,

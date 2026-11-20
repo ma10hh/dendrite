@@ -44,9 +44,11 @@ type MediaMetadata struct {
 	ContentType       ContentType
 	FileSizeBytes     FileSizeBytes
 	CreationTimestamp spec.Timestamp
-	UploadName        Filename
-	Base64Hash        Base64Hash
-	UserID            MatrixUserID
+	// LastAccessTimestamp is when the media was last downloaded, 0 if it never was.
+	LastAccessTimestamp spec.Timestamp
+	UploadName          Filename
+	Base64Hash          Base64Hash
+	UserID              MatrixUserID
 	// Quarantined media is not served.
 	Quarantined bool
 }

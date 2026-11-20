@@ -75,6 +75,7 @@ func NewSQLiteMediaRepositoryTable(db *sql.DB) (tables.MediaRepository, error) {
 	}
 	m := sqlutil.NewMigrator(db)
 	m.AddMigrations(sqlutil.Migration{Version: "mediaapi: quarantined", Up: deltas.UpQuarantined})
+	m.AddMigrations(sqlutil.Migration{Version: "mediaapi: last access", Up: deltas.UpLastAccess})
 	if err = m.Up(context.Background()); err != nil {
 		return nil, err
 	}

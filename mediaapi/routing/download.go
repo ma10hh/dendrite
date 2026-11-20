@@ -285,6 +285,7 @@ func (r *downloadRequest) doDownload(
 		if mediaMetadata.Quarantined {
 			return nil, nil
 		}
+		touchMedia(ctx, db, mediaMetadata.MediaID, mediaMetadata.Origin)
 		// If we have a record, we can respond from the local file
 		r.MediaMetadata = mediaMetadata
 	}

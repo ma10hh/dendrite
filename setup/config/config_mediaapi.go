@@ -35,6 +35,23 @@ type MediaAPI struct {
 
 	// URLPreviews configures GET /preview_url, which makes this server fetch pages for its users.
 	URLPreviews URLPreviews `yaml:"url_previews"`
+
+	// MaxUserStorageBytes is how much media one local user may have stored at the same time. 0 is unlimited.
+	MaxUserStorageBytes FileSizeBytes `yaml:"max_user_storage_bytes"`
+
+	// Retention deletes media that nobody has asked for in a while.
+	Retention MediaRetention `yaml:"retention"`
+}
+
+// MediaRetention configures the removal of media that has not been used for some time. A lifetime counts from the last
+// download, or from the upload if there was none. 0 keeps the media for ever.
+type MediaRetention struct {
+	// LocalMediaLifetime is for media that users of this server uploaded. It cannot be fetched again once it is gone.
+	LocalMediaLifetime time.Duration `yaml:"local_media_lifetime"`
+	// RemoteMediaLifetime is for copies of media of other servers, which are fetched again when they are asked for.
+	RemoteMediaLifetime time.Duration `yaml:"remote_media_lifetime"`
+	// Interval is the time between two runs of the removal.
+	Interval time.Duration `yaml:"interval"`
 }
 
 // URLPreviews configures the URL previews of the media API.
@@ -67,6 +84,7 @@ func (c *MediaAPI) Defaults(opts DefaultOpts) {
 	c.URLPreviews.Timeout = 15 * time.Second
 	c.URLPreviews.CacheLifetime = time.Hour
 	c.URLPreviews.MaxConcurrent = 10
+	c.Retention.Interval = time.Hour
 	if opts.Generate {
 		c.ThumbnailSizes = []ThumbnailSize{
 			{
@@ -100,6 +118,15 @@ func (c *MediaAPI) Verify(configErrs *ConfigErrors) {
 	for i, size := range c.ThumbnailSizes {
 		checkPositive(configErrs, fmt.Sprintf("media_api.thumbnail_sizes[%d].width", i), int64(size.Width))
 		checkPositive(configErrs, fmt.Sprintf("media_api.thumbnail_sizes[%d].height", i), int64(size.Height))
+	}
+
+	checkPositive(configErrs, "media_api.max_user_storage_bytes", int64(c.MaxUserStorageBytes))
+	checkPositive(configErrs, "media_api.retention.local_media_lifetime", int64(c.Retention.LocalMediaLifetime))
+	checkPositive(configErrs, "media_api.retention.remote_media_lifetime", int64(c.Retention.RemoteMediaLifetime))
+	if c.Retention.LocalMediaLifetime > 0 || c.Retention.RemoteMediaLifetime > 0 {
+		if c.Retention.Interval <= 0 {
+			configErrs.Add("invalid value for config key \"media_api.retention.interval\": must be above 0 when a lifetime is set")
+		}
 	}
 
 	if c.URLPreviews.Enabled {

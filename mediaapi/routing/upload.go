@@ -55,6 +55,12 @@ func Upload(req *http.Request, cfg *config.MediaAPI, dev *userapi.Device, db sto
 		return *resErr
 	}
 
+	if r.MediaMetadata.FileSizeBytes > 0 {
+		if resErr = checkUserQuota(req.Context(), cfg, db, r.MediaMetadata.UserID, r.MediaMetadata.FileSizeBytes); resErr != nil {
+			return *resErr
+		}
+	}
+
 	if resErr = r.doUpload(req.Context(), req.Body, cfg, db, activeThumbnailGeneration); resErr != nil {
 		return *resErr
 	}
@@ -165,6 +171,12 @@ func (r *uploadRequest) doUpload(
 	if cfg.MaxFileSizeBytes > 0 && bytesWritten > types.FileSizeBytes(cfg.MaxFileSizeBytes) {
 		fileutils.RemoveDir(tmpDir, r.Logger) // delete temp file
 		return requestEntityTooLargeJSONResponse(cfg.MaxFileSizeBytes)
+	}
+
+	// The size that the request announced is not trusted: the quota is checked again with what was received.
+	if resErr := checkUserQuota(ctx, cfg, db, r.MediaMetadata.UserID, bytesWritten); resErr != nil {
+		fileutils.RemoveDir(tmpDir, r.Logger)
+		return resErr
 	}
 
 	// Look up the media by the file hash. If we already have the file but under a
