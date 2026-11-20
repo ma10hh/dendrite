@@ -124,7 +124,11 @@ ROOM=$(echo "$BODY" | jq -r .room_id)
 call PUT "$HS/_matrix/client/v3/rooms/$ROOM/send/m.room.message/txn1" "$ALICE" '{"msgtype":"m.text","body":"hello from the lab"}'
 expect_code "send a message" 200
 EVENT=$(echo "$BODY" | jq -r .event_id)
-call GET "$HS/_matrix/client/v3/sync?timeout=0" "$ALICE"
+for i in $(seq 1 20); do
+  call GET "$HS/_matrix/client/v3/sync?timeout=0" "$ALICE"
+  [ "$(echo "$BODY" | jq --arg e "$EVENT" '[.rooms.join[]?.timeline.events[]?.event_id] | index($e) != null')" = true ] && break
+  sleep 0.5
+done
 expect_code "sync" 200
 expect "sync shows the message" "true" "$(echo "$BODY" | jq --arg e "$EVENT" '[.rooms.join[].timeline.events[].event_id] | index($e) != null')"
 call POST "$HS/_matrix/client/unstable/org.matrix.simplified_msc3575/sync?timeout=0" "$ALICE" '{"lists":{"all":{"ranges":[[0,10]],"timeline_limit":5}}}'

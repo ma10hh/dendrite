@@ -134,7 +134,7 @@ func NewInternalAPI(
 	}
 
 	eventConsumer := consumers.NewOutputRoomEventConsumer(
-		processContext, &dendriteCfg.UserAPI, js, db, pgClient, rsAPI, syncProducer,
+		processContext, &dendriteCfg.UserAPI, js, db, pgClient, rsAPI, syncProducer, keyChangeProducer,
 	)
 	if err := eventConsumer.Start(); err != nil {
 		logrus.WithError(err).Panic("failed to start user API streamed event consumer")

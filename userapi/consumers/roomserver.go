@@ -46,6 +46,7 @@ type OutputRoomEventConsumer struct {
 	topic        string
 	pgClient     pushgateway.Client
 	syncProducer *producers.SyncAPI
+	keyChanges   *producers.KeyChange
 	msgCounts    map[spec.ServerName]userAPITypes.MessageStats
 	roomCounts   map[spec.ServerName]map[string]bool // map from serverName to map from rommID to "isEncrypted"
 	lastUpdate   time.Time
@@ -61,6 +62,7 @@ func NewOutputRoomEventConsumer(
 	pgClient pushgateway.Client,
 	rsAPI rsapi.UserRoomserverAPI,
 	syncProducer *producers.SyncAPI,
+	keyChanges *producers.KeyChange,
 ) *OutputRoomEventConsumer {
 	return &OutputRoomEventConsumer{
 		ctx:          process.Context(),
@@ -72,6 +74,7 @@ func NewOutputRoomEventConsumer(
 		pgClient:     pgClient,
 		rsAPI:        rsAPI,
 		syncProducer: syncProducer,
+		keyChanges:   keyChanges,
 		msgCounts:    map[spec.ServerName]userAPITypes.MessageStats{},
 		roomCounts:   map[spec.ServerName]map[string]bool{},
 		lastUpdate:   time.Now(),
@@ -97,6 +100,13 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 	var event *rstypes.HeaderedEvent
 	var isNewRoomEvent bool
 	switch rsapi.OutputType(msg.Header.Get(jetstream.RoomEventType)) {
+	case rsapi.OutputTypeMembersAdded:
+		var output rsapi.OutputEvent
+		if err := json.Unmarshal(msg.Data, &output); err != nil || output.MembersAdded == nil {
+			log.WithError(err).Errorf("roomserver output log: message parse failure")
+			return true
+		}
+		return s.onMembersAdded(*output.MembersAdded)
 	case rsapi.OutputTypeNewRoomEvent:
 		isNewRoomEvent = true
 		fallthrough
