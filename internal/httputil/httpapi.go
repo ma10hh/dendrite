@@ -136,6 +136,18 @@ func MakeAdminAPI(
 	})
 }
 
+// requestDuration is how long the handlers take, by handler and status code.
+var requestDuration = promauto.NewHistogramVec(
+	prometheus.HistogramOpts{
+		Namespace: "dendrite",
+		Subsystem: "http",
+		Name:      "request_duration_seconds",
+		Help:      "How long requests took to answer, by handler and status code",
+		Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60},
+	},
+	[]string{"handler", "code"},
+)
+
 // MakeExternalAPI turns a util.JSONRequestHandler function into an http.Handler.
 // This is used for APIs that are called from the internet.
 func MakeExternalAPI(metricsName string, f func(*http.Request) util.JSONResponse) http.Handler {
@@ -195,7 +207,10 @@ func MakeExternalAPI(metricsName string, f func(*http.Request) util.JSONResponse
 
 	}
 
-	return http.HandlerFunc(withSpan)
+	return promhttp.InstrumentHandlerDuration(
+		requestDuration.MustCurryWith(prometheus.Labels{"handler": metricsName}),
+		http.HandlerFunc(withSpan),
+	)
 }
 
 // MakeHTTPAPI adds Span metrics to the HTML Handler function

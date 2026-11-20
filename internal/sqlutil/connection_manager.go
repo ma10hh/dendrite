@@ -62,6 +62,7 @@ func (c *Connections) Connection(dbProperties *config.DatabaseOptions) (*sql.DB,
 		return nil, nil, err
 	}
 	c.existingConnections.Store(dbProperties.ConnectionString, &con{db: db, writer: writer})
+	registerDBStats(db, dbProperties.ConnectionString)
 	go func() {
 		if c.processContext == nil {
 			return

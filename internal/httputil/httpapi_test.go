@@ -10,6 +10,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/matrix-org/util"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func TestWrapHandlerInBasicAuth(t *testing.T) {
@@ -97,5 +100,40 @@ func TestWrapHandlerInBasicAuth(t *testing.T) {
 				t.Errorf("Expected status code %d, got %d", resp.StatusCode, tt.want)
 			}
 		})
+	}
+}
+
+func TestRequestDurationMetric(t *testing.T) {
+	h := MakeExternalAPI("metric_test_handler", func(*http.Request) util.JSONResponse {
+		return util.JSONResponse{Code: http.StatusTeapot, JSON: struct{}{}}
+	})
+	for i := 0; i < 2; i++ {
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
+		if rec.Code != http.StatusTeapot {
+			t.Fatalf("code %d", rec.Code)
+		}
+	}
+	mfs, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var samples uint64
+	for _, mf := range mfs {
+		if mf.GetName() != "dendrite_http_request_duration_seconds" {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			labels := map[string]string{}
+			for _, l := range m.GetLabel() {
+				labels[l.GetName()] = l.GetValue()
+			}
+			if labels["handler"] == "metric_test_handler" && labels["code"] == "418" {
+				samples = m.GetHistogram().GetSampleCount()
+			}
+		}
+	}
+	if samples != 2 {
+		t.Errorf("observed %d requests of the handler with code 418, want 2", samples)
 	}
 }

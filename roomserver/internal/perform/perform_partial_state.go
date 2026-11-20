@@ -13,6 +13,8 @@ import (
 
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
 
 	"github.com/element-hq/dendrite/roomserver/api"
@@ -23,6 +25,21 @@ import (
 const (
 	partialStateResyncInterval = 2 * time.Second
 	partialStateMaxBackoff     = 10 * time.Minute
+)
+
+var (
+	partialStateRooms = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "dendrite",
+		Subsystem: "roomserver",
+		Name:      "partial_state_rooms",
+		Help:      "Rooms that were joined with partial state and have not got their full state yet",
+	})
+	partialStateResyncs = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "dendrite",
+		Subsystem: "roomserver",
+		Name:      "partial_state_resyncs_total",
+		Help:      "Attempts to fetch the full state of a room, by result: success or failure",
+	}, []string{"result"})
 )
 
 // PartialStateResyncer makes the state of the rooms that were joined with partial state whole: it fetches the
@@ -65,6 +82,7 @@ func (r *PartialStateResyncer) ResyncAll(ctx context.Context) {
 		logrus.WithError(err).Error("failed to list the rooms with partial state")
 		return
 	}
+	partialStateRooms.Set(float64(len(rooms)))
 	for _, room := range rooms {
 		if ctx.Err() != nil {
 			return
@@ -74,10 +92,12 @@ func (r *PartialStateResyncer) ResyncAll(ctx context.Context) {
 		}
 		logger := logrus.WithField("room_nid", room.RoomNID)
 		if err := r.Resync(ctx, room); err != nil {
+			partialStateResyncs.WithLabelValues("failure").Inc()
 			delay := r.failed(room.RoomNID)
 			logger.WithError(err).Warnf("failed to fetch the full state of a room, trying again in %s", delay)
 			continue
 		}
+		partialStateResyncs.WithLabelValues("success").Inc()
 		r.succeeded(room.RoomNID)
 	}
 }

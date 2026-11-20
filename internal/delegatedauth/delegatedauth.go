@@ -17,6 +17,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/element-hq/dendrite/setup/config"
@@ -215,12 +217,23 @@ func (p *Provider) get(ctx context.Context, u string) (json.RawMessage, error) {
 	return io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
 }
 
+var introspections = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "dendrite",
+		Subsystem: "delegated_auth",
+		Name:      "introspections_total",
+		Help:      "Access tokens checked with the provider, by how: cache_hit, active, inactive or error (the provider could not be asked)",
+	},
+	[]string{"result"},
+)
+
 // Introspect validates an access token with the provider. It returns (nil, nil) if
 // the token is not active. An error means the provider could not be asked, which must
 // not be treated as the token being invalid.
 func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, error) {
 	key := cacheKey(accessToken)
 	if token, ok := p.cached(key); ok {
+		introspections.WithLabelValues("cache_hit").Inc()
 		return token, nil
 	}
 	// Concurrent lookups of the same token share one request to the provider.
@@ -229,9 +242,16 @@ func (p *Provider) Introspect(ctx context.Context, accessToken string) (*Token, 
 		return p.introspectRemote(detached, accessToken, key)
 	})
 	if err != nil {
+		introspections.WithLabelValues("error").Inc()
 		return nil, err
 	}
-	return v.(*Token), nil
+	token := v.(*Token)
+	if token == nil {
+		introspections.WithLabelValues("inactive").Inc()
+	} else {
+		introspections.WithLabelValues("active").Inc()
+	}
+	return token, nil
 }
 
 // Invalidate forgets what is known about a token, for example because its device was deleted.

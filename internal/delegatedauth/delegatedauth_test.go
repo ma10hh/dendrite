@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/element-hq/dendrite/setup/config"
 )
 
@@ -309,5 +311,56 @@ func TestAdminScopeOnlyCountsInMASMode(t *testing.T) {
 	tok, err := New(f.config()).Introspect(context.Background(), "tok")
 	if err != nil || tok == nil || tok.IsAdmin {
 		t.Errorf("a generic provider must not make admins: got (%+v, %v)", tok, err)
+	}
+}
+
+func TestIntrospectionMetrics(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	p := New(f.config())
+	ctx := context.Background()
+	count := func(result string) float64 {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, mf := range mfs {
+			if mf.GetName() != "dendrite_delegated_auth_introspections_total" {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, l := range m.GetLabel() {
+					if l.GetName() == "result" && l.GetValue() == result {
+						return m.GetCounter().GetValue()
+					}
+				}
+			}
+		}
+		return 0
+	}
+	before := map[string]float64{}
+	for _, r := range []string{"active", "inactive", "cache_hit", "error"} {
+		before[r] = count(r)
+	}
+
+	f.response = `{"active": true, "username": "alice", "scope": "urn:matrix:client:api:* urn:matrix:client:device:ABCDEF"}`
+	for i := 0; i < 3; i++ {
+		if _, err := p.Introspect(ctx, "good"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.response = `{"active": false}`
+	if _, err := p.Introspect(ctx, "revoked"); err != nil {
+		t.Fatal(err)
+	}
+	cfg := f.config()
+	f.Close()
+	if _, err := New(cfg).Introspect(ctx, "tok"); err == nil {
+		t.Fatal("expected an error when the provider is unreachable")
+	}
+
+	for result, want := range map[string]float64{"active": 1, "inactive": 1, "cache_hit": 2, "error": 1} {
+		if got := count(result) - before[result]; got != want {
+			t.Errorf("%s: %v, want %v", result, got, want)
+		}
 	}
 }
