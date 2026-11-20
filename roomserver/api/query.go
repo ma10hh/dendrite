@@ -124,6 +124,9 @@ type QueryMembershipForUserResponse struct {
 	// True if the user asked to forget this room.
 	IsRoomForgotten bool `json:"is_room_forgotten"`
 	RoomExists      bool `json:"room_exists"`
+	// True if the room was joined with part of its state left out, which has not been fetched yet: its list of
+	// members is not whole.
+	PartialState bool `json:"partial_state"`
 	// The sender ID of the user in the room, if it exists
 	SenderID *spec.SenderID
 }
@@ -170,6 +173,9 @@ type QueryServerJoinedToRoomResponse struct {
 	IsInRoom bool `json:"is_in_room"`
 	// The roomversion if joined to room
 	RoomVersion gomatrixserverlib.RoomVersion
+	// True if the room was joined with part of its state left out that has not been fetched yet. Such a room cannot
+	// be joined or knocked on through this server.
+	PartialState bool `json:"partial_state"`
 }
 
 // QueryServerAllowedToSeeEventRequest is a request to QueryServerAllowedToSeeEvent

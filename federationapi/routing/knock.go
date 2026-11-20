@@ -79,7 +79,7 @@ func MakeKnock(
 		util.GetLogger(ctx).WithError(err).Error("rsAPI.QueryServerJoinedToRoom failed")
 		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 	}
-	if !inRoom.RoomExists || !inRoom.IsInRoom {
+	if !inRoom.RoomExists || !inRoom.IsInRoom || inRoom.PartialState {
 		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound(fmt.Sprintf("Local server not currently joined to room: %s", roomID.String()))}
 	}
 	roomVersion := inRoom.RoomVersion
@@ -197,7 +197,7 @@ func SendKnock(
 		util.GetLogger(ctx).WithError(err).Error("rsAPI.QueryServerJoinedToRoom failed")
 		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 	}
-	if !inRoom.RoomExists || !inRoom.IsInRoom {
+	if !inRoom.RoomExists || !inRoom.IsInRoom || inRoom.PartialState {
 		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Local server not currently joined to room")}
 	}
 

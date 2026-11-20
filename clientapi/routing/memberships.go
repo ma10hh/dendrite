@@ -66,11 +66,18 @@ func GetJoinedMembers(
 	}
 
 	var queryRes api.QueryMembershipForUserResponse
-	if queryErr := rsAPI.QueryMembershipForUser(req.Context(), &queryReq, &queryRes); queryErr != nil {
+	whole, queryErr := api.QueryMembershipWhenStateIsWhole(req.Context(), rsAPI, &queryReq, &queryRes)
+	if queryErr != nil {
 		util.GetLogger(req.Context()).WithError(queryErr).Error("rsAPI.QueryMembershipsForRoom failed")
 		return util.JSONResponse{
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
+		}
+	}
+	if !whole {
+		return util.JSONResponse{
+			Code: http.StatusServiceUnavailable,
+			JSON: spec.Unknown("The members of the room are still being fetched, try again in a moment."),
 		}
 	}
 

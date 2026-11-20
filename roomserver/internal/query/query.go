@@ -265,6 +265,11 @@ func (r *Queryer) queryMembershipForOptionalSenderID(ctx context.Context, roomID
 		return nil
 	}
 	response.RoomExists = true
+	partial, err := r.DB.PartialStateOfRoom(ctx, info.RoomNID)
+	if err != nil {
+		return err
+	}
+	response.PartialState = partial != nil
 
 	if senderID == nil {
 		return nil
@@ -502,6 +507,11 @@ func (r *Queryer) QueryServerJoinedToRoom(
 		return nil
 	}
 	response.RoomExists = true
+	partial, err := r.DB.PartialStateOfRoom(ctx, info.RoomNID)
+	if err != nil {
+		return fmt.Errorf("r.DB.PartialStateOfRoom: %w", err)
+	}
+	response.PartialState = partial != nil
 
 	if r.IsLocalServerName(request.ServerName) || request.ServerName == "" {
 		response.IsInRoom, err = r.DB.GetLocalServerInRoom(ctx, info.RoomNID)

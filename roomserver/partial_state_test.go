@@ -90,6 +90,14 @@ func TestJoinWithPartialState(t *testing.T) {
 			assert.NotEqual(t, bob.ID, tuple.StateKey)
 		}
 
+		localID, _ := spec.NewUserID(local.ID, true)
+		membership := api.QueryMembershipForUserResponse{}
+		require.NoError(t, rsAPI.QueryMembershipForUser(ctx, &api.QueryMembershipForUserRequest{RoomID: room.ID, UserID: *localID}, &membership))
+		assert.True(t, membership.PartialState, "the members of the room are not all known")
+		server := api.QueryServerJoinedToRoomResponse{}
+		require.NoError(t, rsAPI.QueryServerJoinedToRoom(ctx, &api.QueryServerJoinedToRoomRequest{RoomID: room.ID}, &server))
+		assert.True(t, server.PartialState)
+
 		rooms, err := db.PartialStateRooms(ctx)
 		require.NoError(t, err)
 		assert.Len(t, rooms, 1)
@@ -97,6 +105,8 @@ func TestJoinWithPartialState(t *testing.T) {
 		partial, err = db.PartialStateOfRoom(ctx, info.RoomNID)
 		require.NoError(t, err)
 		assert.Nil(t, partial)
+		require.NoError(t, rsAPI.QueryMembershipForUser(ctx, &api.QueryMembershipForUserRequest{RoomID: room.ID, UserID: *localID}, &membership))
+		assert.False(t, membership.PartialState)
 	})
 }
 

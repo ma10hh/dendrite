@@ -375,3 +375,32 @@ func GeneratePDU(
 	}
 	return ev, nil
 }
+
+// PartialStateWait is how long a request that needs all the members of a room waits for the state of a room that was
+// joined with partial state to be fetched.
+const PartialStateWait = 30 * time.Second
+
+// QueryMembershipWhenStateIsWhole is QueryMembershipForUser, but if the room has partial state it asks again until
+// the state is whole, or the wait is over. ok is false then, and the answer is the last one.
+func QueryMembershipWhenStateIsWhole(
+	ctx context.Context, rsAPI interface {
+		QueryMembershipForUser(ctx context.Context, req *QueryMembershipForUserRequest, res *QueryMembershipForUserResponse) error
+	},
+	req *QueryMembershipForUserRequest, res *QueryMembershipForUserResponse,
+) (ok bool, err error) {
+	deadline := time.Now().Add(PartialStateWait)
+	for {
+		*res = QueryMembershipForUserResponse{}
+		if err = rsAPI.QueryMembershipForUser(ctx, req, res); err != nil || !res.PartialState {
+			return err == nil, err
+		}
+		if time.Now().After(deadline) {
+			return false, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-time.After(250 * time.Millisecond):
+		}
+	}
+}

@@ -115,7 +115,7 @@ func MakeJoin(
 		RemoteVersions:    remoteVersions,
 		RequestOrigin:     request.Origin(),
 		LocalServerName:   cfg.Matrix.ServerName,
-		LocalServerInRoom: res.RoomExists && res.IsInRoom,
+		LocalServerInRoom: res.RoomExists && res.IsInRoom && !res.PartialState,
 		RoomQuerier:       &roomQuerier,
 		UserIDQuerier: func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return rsAPI.QueryUserIDForSender(httpReq.Context(), roomID, senderID)
@@ -197,6 +197,15 @@ func SendJoin(
 		return util.JSONResponse{
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
+		}
+	}
+
+	// A room whose members are not all known here cannot hand out its state.
+	var inRoom api.QueryServerJoinedToRoomResponse
+	if err = rsAPI.QueryServerJoinedToRoom(httpReq.Context(), &api.QueryServerJoinedToRoomRequest{RoomID: roomID.String()}, &inRoom); err == nil && inRoom.PartialState {
+		return util.JSONResponse{
+			Code: http.StatusNotFound,
+			JSON: spec.NotFound("The state of the room is not complete on this server"),
 		}
 	}
 
