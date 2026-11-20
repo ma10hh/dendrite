@@ -2322,3 +2322,8 @@ func (d *Database) ForgetPartialStateEvents(ctx context.Context, roomNID types.R
 		return d.PartialStateEvents.DeletePartialStateEvents(ctx, txn, roomNID)
 	})
 }
+
+// AllRoomIDs returns the IDs of all the rooms this server has events of.
+func (d *Database) AllRoomIDs(ctx context.Context) ([]string, error) {
+	return d.RoomsTable.SelectAllRoomIDs(ctx, nil)
+}

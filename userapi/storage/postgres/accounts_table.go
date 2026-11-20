@@ -57,6 +57,9 @@ const deactivateAccountSQL = "" +
 const reactivateAccountSQL = "" +
 	"UPDATE userapi_accounts SET is_deactivated = FALSE WHERE localpart = $1 AND server_name = $2"
 
+const updateAccountTypeSQL = "" +
+	"UPDATE userapi_accounts SET account_type = $1 WHERE localpart = $2 AND server_name = $3"
+
 const selectAccountByLocalpartSQL = "" +
 	"SELECT localpart, server_name, appservice_id, account_type, is_deactivated FROM userapi_accounts WHERE localpart = $1 AND server_name = $2"
 
@@ -71,6 +74,7 @@ type accountsStatements struct {
 	updatePasswordStmt            *sql.Stmt
 	deactivateAccountStmt         *sql.Stmt
 	reactivateAccountStmt         *sql.Stmt
+	updateAccountTypeStmt         *sql.Stmt
 	selectAccountByLocalpartStmt  *sql.Stmt
 	selectPasswordHashStmt        *sql.Stmt
 	selectNewNumericLocalpartStmt *sql.Stmt
@@ -107,6 +111,7 @@ func NewPostgresAccountsTable(db *sql.DB, serverName spec.ServerName) (tables.Ac
 		{&s.updatePasswordStmt, updatePasswordSQL},
 		{&s.deactivateAccountStmt, deactivateAccountSQL},
 		{&s.reactivateAccountStmt, reactivateAccountSQL},
+		{&s.updateAccountTypeStmt, updateAccountTypeSQL},
 		{&s.selectAccountByLocalpartStmt, selectAccountByLocalpartSQL},
 		{&s.selectPasswordHashStmt, selectPasswordHashSQL},
 		{&s.selectNewNumericLocalpartStmt, selectNewNumericLocalpartSQL},
@@ -205,4 +210,11 @@ func (s *accountsStatements) SelectNewNumericLocalpart(
 	}
 	err = stmt.QueryRowContext(ctx, serverName).Scan(&id)
 	return id + 1, err
+}
+
+func (s *accountsStatements) UpdateAccountType(
+	ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType,
+) error {
+	_, err := s.updateAccountTypeStmt.ExecContext(ctx, accountType, localpart, serverName)
+	return err
 }

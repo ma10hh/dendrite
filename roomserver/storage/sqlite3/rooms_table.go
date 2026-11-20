@@ -57,6 +57,9 @@ const selectRoomVersionsForRoomNIDsSQL = "" +
 const selectRoomInfoSQL = "" +
 	"SELECT room_version, room_nid, state_snapshot_nid, latest_event_nids FROM roomserver_rooms WHERE room_id = $1"
 
+const selectAllRoomIDsSQL = "" +
+	"SELECT room_id FROM roomserver_rooms WHERE latest_event_nids <> '[]' ORDER BY room_id"
+
 const bulkSelectRoomIDsSQL = "" +
 	"SELECT room_id FROM roomserver_rooms WHERE room_nid IN ($1)"
 
@@ -75,7 +78,8 @@ type roomStatements struct {
 	selectLatestEventNIDsForUpdateStmt *sql.Stmt
 	updateLatestEventNIDsStmt          *sql.Stmt
 	//selectRoomVersionForRoomNIDStmt    *sql.Stmt
-	selectRoomInfoStmt *sql.Stmt
+	selectRoomInfoStmt   *sql.Stmt
+	selectAllRoomIDsStmt *sql.Stmt
 }
 
 func CreateRoomsTable(db *sql.DB) error {
@@ -96,6 +100,7 @@ func PrepareRoomsTable(db *sql.DB) (tables.Rooms, error) {
 		{&s.updateLatestEventNIDsStmt, updateLatestEventNIDsSQL},
 		//{&s.selectRoomVersionForRoomNIDsStmt, selectRoomVersionForRoomNIDsSQL},
 		{&s.selectRoomInfoStmt, selectRoomInfoSQL},
+		{&s.selectAllRoomIDsStmt, selectAllRoomIDsSQL},
 		{&s.selectRoomNIDForUpdateStmt, selectRoomNIDForUpdateSQL},
 	}.Prepare(db)
 }
@@ -291,4 +296,21 @@ func (s *roomStatements) BulkSelectRoomNIDs(ctx context.Context, txn *sql.Tx, ro
 		roomNIDs = append(roomNIDs, roomNID)
 	}
 	return roomNIDs, rows.Err()
+}
+
+func (s *roomStatements) SelectAllRoomIDs(ctx context.Context, txn *sql.Tx) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectAllRoomIDsStmt).QueryContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "selectAllRoomIDsStmt: rows.close() failed")
+	var roomIDs []string
+	for rows.Next() {
+		var roomID string
+		if err = rows.Scan(&roomID); err != nil {
+			return nil, err
+		}
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs, rows.Err()
 }

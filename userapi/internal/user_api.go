@@ -1014,3 +1014,13 @@ func (a *UserInternalAPI) PerformSaveThreePIDAssociation(ctx context.Context, re
 }
 
 const pushRulesAccountDataType = "m.push_rules"
+
+// AdminListAccounts implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminListAccounts(ctx context.Context, filter api.AccountListFilter) ([]api.AccountListEntry, int, error) {
+	return a.DB.AdminListAccounts(ctx, filter)
+}
+
+// AdminSetAccountType implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminSetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType) error {
+	return a.DB.SetAccountType(ctx, localpart, serverName, accountType)
+}

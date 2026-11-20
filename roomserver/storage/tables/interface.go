@@ -86,6 +86,8 @@ type Rooms interface {
 	SelectRoomInfo(ctx context.Context, txn *sql.Tx, roomID string) (*types.RoomInfo, error)
 	BulkSelectRoomIDs(ctx context.Context, txn *sql.Tx, roomNIDs []types.RoomNID) ([]string, error)
 	BulkSelectRoomNIDs(ctx context.Context, txn *sql.Tx, roomIDs []string) ([]types.RoomNID, error)
+	// SelectAllRoomIDs returns the IDs of the rooms that have events, which are not stubs.
+	SelectAllRoomIDs(ctx context.Context, txn *sql.Tx) ([]string, error)
 }
 
 type StateSnapshot interface {
@@ -265,6 +267,8 @@ func ExtractContentValue(ev *types.HeaderedEvent) string {
 		key = "topic"
 	case "m.room.guest_access":
 		key = "guest_access"
+	case "m.room.encryption":
+		key = "algorithm"
 	case "m.room.server_acl":
 		// We need the entire content and not only one key, so we can use it
 		// on startup to generate the ACLs. This is merely a workaround.

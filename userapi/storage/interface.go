@@ -47,6 +47,8 @@ type Account interface {
 	GetAccountByPassword(ctx context.Context, localpart string, serverName spec.ServerName, plaintextPassword string) (*api.Account, error)
 	GetNewNumericLocalpart(ctx context.Context, serverName spec.ServerName) (int64, error)
 	CheckAccountAvailability(ctx context.Context, localpart string, serverName spec.ServerName) (bool, error)
+	AdminListAccounts(ctx context.Context, filter api.AccountListFilter) ([]api.AccountListEntry, int, error)
+	SetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType) error
 	GetAccountByLocalpart(ctx context.Context, localpart string, serverName spec.ServerName) (*api.Account, error)
 	DeactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)
 	ReactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)

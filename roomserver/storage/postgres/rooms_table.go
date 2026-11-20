@@ -68,6 +68,9 @@ const selectRoomVersionsForRoomNIDsSQL = "" +
 const selectRoomInfoSQL = "" +
 	"SELECT room_version, room_nid, state_snapshot_nid, latest_event_nids FROM roomserver_rooms WHERE room_id = $1"
 
+const selectAllRoomIDsSQL = "" +
+	"SELECT room_id FROM roomserver_rooms WHERE cardinality(latest_event_nids) > 0 ORDER BY room_id"
+
 const bulkSelectRoomIDsSQL = "" +
 	"SELECT room_id FROM roomserver_rooms WHERE room_nid = ANY($1)"
 
@@ -84,6 +87,7 @@ type roomStatements struct {
 	selectRoomVersionsForRoomNIDsStmt  *sql.Stmt
 	selectRoomInfoStmt                 *sql.Stmt
 	bulkSelectRoomIDsStmt              *sql.Stmt
+	selectAllRoomIDsStmt               *sql.Stmt
 	bulkSelectRoomNIDsStmt             *sql.Stmt
 }
 
@@ -105,6 +109,7 @@ func PrepareRoomsTable(db *sql.DB) (tables.Rooms, error) {
 		{&s.selectRoomVersionsForRoomNIDsStmt, selectRoomVersionsForRoomNIDsSQL},
 		{&s.selectRoomInfoStmt, selectRoomInfoSQL},
 		{&s.bulkSelectRoomIDsStmt, bulkSelectRoomIDsSQL},
+		{&s.selectAllRoomIDsStmt, selectAllRoomIDsSQL},
 		{&s.bulkSelectRoomNIDsStmt, bulkSelectRoomNIDsSQL},
 	}.Prepare(db)
 }
@@ -278,4 +283,21 @@ func roomNIDsAsArray(roomNIDs []types.RoomNID) pq.Int64Array {
 		nids[i] = int64(roomNIDs[i])
 	}
 	return nids
+}
+
+func (s *roomStatements) SelectAllRoomIDs(ctx context.Context, txn *sql.Tx) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectAllRoomIDsStmt).QueryContext(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "selectAllRoomIDsStmt: rows.close() failed")
+	var roomIDs []string
+	for rows.Next() {
+		var roomID string
+		if err = rows.Scan(&roomID); err != nil {
+			return nil, err
+		}
+		roomIDs = append(roomIDs, roomID)
+	}
+	return roomIDs, rows.Err()
 }

@@ -354,3 +354,8 @@ func (r *Admin) PerformAdminDeleteEventReport(ctx context.Context, reportID uint
 func (r *Admin) AdminQueryEmptyRooms(ctx context.Context) ([]string, error) {
 	return r.DB.EmptyRooms(ctx)
 }
+
+// AdminQueryAllRooms returns the IDs of all the rooms of this server.
+func (r *Admin) AdminQueryAllRooms(ctx context.Context) ([]string, error) {
+	return r.DB.AllRoomIDs(ctx)
+}

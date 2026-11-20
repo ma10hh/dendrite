@@ -22,6 +22,7 @@ import (
 
 type Database interface {
 	UserRoomKeys
+	AllRooms
 	PartialState
 	ReportedEvents
 	// Do we support processing input events for more than one room at a time?
@@ -270,6 +271,11 @@ type PartialState interface {
 	RecordPartialStateEvent(ctx context.Context, roomNID types.RoomNID, eventNID types.EventNID, recheck bool) error
 	PartialStateEventsOfRoom(ctx context.Context, roomNID types.RoomNID) ([]types.PartialStateEvent, error)
 	ForgetPartialStateEvents(ctx context.Context, roomNID types.RoomNID) error
+}
+
+// AllRooms lists the rooms of the server.
+type AllRooms interface {
+	AllRoomIDs(ctx context.Context) ([]string, error)
 }
 
 type ReportedEvents interface {

@@ -42,6 +42,7 @@ type AccountsTable interface {
 	UpdatePassword(ctx context.Context, localpart string, serverName spec.ServerName, passwordHash string) (err error)
 	DeactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)
 	ReactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)
+	UpdateAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType) error
 	SelectPasswordHash(ctx context.Context, localpart string, serverName spec.ServerName) (hash string, err error)
 	SelectAccountByLocalpart(ctx context.Context, localpart string, serverName spec.ServerName) (*api.Account, error)
 	SelectNewNumericLocalpart(ctx context.Context, txn *sql.Tx, serverName spec.ServerName) (id int64, err error)

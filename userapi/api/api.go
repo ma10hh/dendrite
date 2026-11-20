@@ -102,6 +102,10 @@ type ClientUserAPI interface {
 	PerformAccountDeactivation(ctx context.Context, req *PerformAccountDeactivationRequest, res *PerformAccountDeactivationResponse) error
 	PerformAccountReactivation(ctx context.Context, req *PerformAccountReactivationRequest, res *PerformAccountReactivationResponse) error
 	QueryAccountByLocalpart(ctx context.Context, req *QueryAccountByLocalpartRequest, res *QueryAccountByLocalpartResponse) (err error)
+	// AdminListAccounts lists the accounts of this server for the admin API, and how many there are in all.
+	AdminListAccounts(ctx context.Context, filter AccountListFilter) ([]AccountListEntry, int, error)
+	// AdminSetAccountType makes an account an admin (AccountTypeAdmin) or a plain user (AccountTypeUser).
+	AdminSetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType AccountType) error
 	PerformOpenIDTokenCreation(ctx context.Context, req *PerformOpenIDTokenCreationRequest, res *PerformOpenIDTokenCreationResponse) error
 	QueryNotifications(ctx context.Context, req *QueryNotificationsRequest, res *QueryNotificationsResponse) error
 	InputAccountData(ctx context.Context, req *InputAccountDataRequest, res *InputAccountDataResponse) error
@@ -999,4 +1003,30 @@ type PerformMarkAsStaleRequest struct {
 	UserID   string
 	Domain   spec.ServerName
 	DeviceID string
+}
+
+// AccountListFilter selects and orders the accounts of a list for the admin API.
+type AccountListFilter struct {
+	// Name matches (case-insensitive substring) the user ID or the display name. UserID matches the user ID only.
+	Name, UserID string
+	// Guests includes guest accounts, Deactivated includes deactivated ones.
+	Guests, Deactivated bool
+	// OrderBy is one of name, creation_ts, displayname, admin, guest or deactivated, and defaults to name.
+	OrderBy   string
+	Backwards bool
+	From      int
+	Limit     int
+}
+
+// AccountListEntry is one account of such a list.
+type AccountListEntry struct {
+	UserID      string
+	Localpart   string
+	ServerName  spec.ServerName
+	CreatedTS   int64
+	AccountType AccountType
+	AppService  string
+	Deactivated bool
+	DisplayName string
+	AvatarURL   string
 }

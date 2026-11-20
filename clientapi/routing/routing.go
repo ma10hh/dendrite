@@ -29,6 +29,7 @@ import (
 	clientutil "github.com/element-hq/dendrite/clientapi/httputil"
 	"github.com/element-hq/dendrite/clientapi/producers"
 	federationAPI "github.com/element-hq/dendrite/federationapi/api"
+	"github.com/element-hq/dendrite/internal"
 	"github.com/element-hq/dendrite/internal/delegatedauth"
 	"github.com/element-hq/dendrite/internal/httputil"
 	"github.com/element-hq/dendrite/internal/transactions"
@@ -174,6 +175,124 @@ func Setup(
 			}),
 		).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
 	}
+
+	// The users part of the Synapse admin API.
+	synapseAdminRouter.Handle("/admin/v2/users",
+		httputil.MakeAdminAPI("synapse_admin_list_users", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminListUsers(req, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/users/{userId}",
+		httputil.MakeAdminAPI("synapse_admin_user", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			if req.Method == http.MethodPut {
+				return SynapseAdminPutUser(req, cfg, userAPI)
+			}
+			return SynapseAdminGetUser(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodPut, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/deactivate/{userId}",
+		httputil.MakeAdminAPI("synapse_admin_deactivate", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminDeactivate(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/reset_password/{userId}",
+		httputil.MakeAdminAPI("synapse_admin_reset_password", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminResetPassword(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/users/{userId}/devices",
+		httputil.MakeAdminAPI("synapse_admin_user_devices", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminListDevices(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/users/{userId}/devices/{deviceId}",
+		httputil.MakeAdminAPI("synapse_admin_delete_device", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminDeleteDevices(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/users/{userId}/delete_devices",
+		httputil.MakeAdminAPI("synapse_admin_delete_devices", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminDeleteDevices(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/joined_rooms",
+		httputil.MakeAdminAPI("synapse_admin_joined_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminJoinedRooms(req, cfg, userAPI, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+
+	// The rooms part of the Synapse admin API.
+	synapseAdminRouter.Handle("/admin/v1/rooms",
+		httputil.MakeAdminAPI("synapse_admin_list_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminListRooms(req, cfg, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/rooms/{roomId}",
+		httputil.MakeAdminAPI("synapse_admin_room", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			if req.Method == http.MethodDelete {
+				return SynapseAdminDeleteRoom(req, rsAPI, false)
+			}
+			return SynapseAdminGetRoom(req, cfg, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/rooms/{roomId}/members",
+		httputil.MakeAdminAPI("synapse_admin_room_members", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRoomMembers(req, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/rooms/{roomId}/state",
+		httputil.MakeAdminAPI("synapse_admin_room_state", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRoomState(req, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/rooms/{roomId}",
+		httputil.MakeAdminAPI("synapse_admin_delete_room", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminDeleteRoom(req, rsAPI, true)
+		}),
+	).Methods(http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/rooms/{roomId}/delete_status",
+		httputil.MakeAdminAPI("synapse_admin_room_delete_status", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRoomDeleteStatus(req)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v2/rooms/delete_status/{deleteId}",
+		httputil.MakeAdminAPI("synapse_admin_delete_status", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRoomDeleteStatus(req)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+
+	// Registration tokens and the server version at the Synapse paths. The handlers are the ones of the Dendrite admin
+	// API, whose requests and answers follow Synapse's.
+	synapseAdminRouter.Handle("/admin/v1/registration_tokens/new",
+		httputil.MakeAdminAPI("synapse_admin_registration_tokens_new", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return AdminCreateNewRegistrationToken(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/registration_tokens",
+		httputil.MakeAdminAPI("synapse_admin_registration_tokens", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return AdminListRegistrationTokens(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/registration_tokens/{token}",
+		httputil.MakeAdminAPI("synapse_admin_registration_token", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			switch req.Method {
+			case http.MethodGet:
+				return AdminGetRegistrationToken(req, cfg, userAPI)
+			case http.MethodPut:
+				return AdminUpdateRegistrationToken(req, cfg, userAPI)
+			case http.MethodDelete:
+				return AdminDeleteRegistrationToken(req, cfg, userAPI)
+			default:
+				return util.MatrixErrorResponse(404, string(spec.ErrorNotFound), "unknown method")
+			}
+		}),
+	).Methods(http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/server_version",
+		httputil.MakeAdminAPI("synapse_admin_server_version", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return util.JSONResponse{Code: http.StatusOK, JSON: map[string]string{"server_version": "Dendrite " + internal.VersionString()}}
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+
 	dendriteAdminRouter.Handle("/admin/registrationTokens/new",
 		httputil.MakeAdminAPI("admin_registration_tokens_new", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return AdminCreateNewRegistrationToken(req, cfg, userAPI)
