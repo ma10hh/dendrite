@@ -46,6 +46,7 @@ type RoomserverInternalAPI struct {
 	*perform.Upgrader
 	*perform.Admin
 	*perform.Creator
+	PartialStateResyncer   *perform.PartialStateResyncer
 	ProcessContext         *process.ProcessContext
 	DB                     storage.Database
 	Cfg                    *config.Dendrite
@@ -214,10 +215,14 @@ func (r *RoomserverInternalAPI) SetFederationAPI(fsAPI fsAPI.RoomserverFederatio
 		Cfg:   &r.Cfg.RoomServer,
 		RSAPI: r,
 	}
+	r.PartialStateResyncer = &perform.PartialStateResyncer{DB: r.DB, Admin: r.Admin}
 
 	if err := r.Inputer.Start(); err != nil {
 		logrus.WithError(err).Panic("failed to start roomserver input API")
 	}
+
+	// Rooms that were joined with partial state get their full state in the background, also after a restart.
+	go r.PartialStateResyncer.Run(r.ProcessContext.Context())
 }
 
 func (r *RoomserverInternalAPI) SetUserAPI(userAPI userapi.RoomserverUserAPI) {
