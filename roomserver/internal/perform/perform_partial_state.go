@@ -11,9 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/sirupsen/logrus"
 
+	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/storage"
 	"github.com/element-hq/dendrite/roomserver/types"
 )
@@ -118,13 +120,60 @@ func (r *PartialStateResyncer) Resync(ctx context.Context, partial types.Partial
 		if r.Admin.Cfg.Matrix.IsLocalServerName(spec.ServerName(server)) {
 			continue
 		}
-		if lastErr = r.Admin.PerformAdminDownloadState(ctx, roomIDString, userID.String(), spec.ServerName(server)); lastErr == nil {
+		if lastErr = r.fetchMembers(ctx, info, events[0].PDU, spec.ServerName(server)); lastErr == nil {
 			logrus.WithFields(logrus.Fields{"room_id": roomIDString, "server": server}).Info("the room has its full state now")
 			return r.DB.ClearRoomPartialState(ctx, partial.RoomNID)
 		}
 		logrus.WithError(lastErr).WithFields(logrus.Fields{"room_id": roomIDString, "server": server}).Warn("failed to fetch the state of a room")
 	}
 	return lastErr
+}
+
+// fetchMembers asks the server for the state of the room at the join, checks the signatures of the memberships in
+// it, stores them as outliers (which checks them against their auth events) and has the roomserver add them to the
+// state of the room. No event is created, and nothing is sent to other servers.
+func (r *PartialStateResyncer) fetchMembers(
+	ctx context.Context, info *types.RoomInfo, join gomatrixserverlib.PDU, server spec.ServerName,
+) error {
+	in := r.Admin.Inputer
+	resp, err := in.FSAPI.LookupState(ctx, in.ServerName, server, join.RoomID().String(), join.EventID(), info.RoomVersion)
+	if err != nil {
+		return fmt.Errorf("LookupState: %w", err)
+	}
+	var inputs []api.InputRoomEvent
+	var memberIDs []string
+	for _, ev := range resp.GetStateEvents().UntrustedEvents(info.RoomVersion) {
+		if ev.Type() != spec.MRoomMember || ev.StateKey() == nil || ev.RoomID().String() != join.RoomID().String() {
+			continue
+		}
+		if verr := gomatrixserverlib.VerifyEventSignatures(ctx, ev, in.KeyRing, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+			return r.Admin.Queryer.QueryUserIDForSender(ctx, roomID, senderID)
+		}); verr != nil {
+			continue
+		}
+		inputs = append(inputs, api.InputRoomEvent{Kind: api.KindOutlier, Event: &types.HeaderedEvent{PDU: ev}, Origin: server})
+		memberIDs = append(memberIDs, ev.EventID())
+	}
+
+	// An event the roomserver rejects is not an error here: it is left out of the state.
+	if len(inputs) > 0 {
+		var res api.InputRoomEventsResponse
+		in.InputRoomEvents(ctx, &api.InputRoomEventsRequest{InputRoomEvents: inputs}, &res)
+		if res.ErrMsg != "" && res.ErrMsg != api.InputWasRejected {
+			return fmt.Errorf("storing the memberships: %s", res.ErrMsg)
+		}
+	}
+	var res api.InputRoomEventsResponse
+	in.InputRoomEvents(ctx, &api.InputRoomEventsRequest{InputRoomEvents: []api.InputRoomEvent{{
+		Kind:           api.KindAddMembers,
+		Event:          &types.HeaderedEvent{PDU: join},
+		Origin:         server,
+		MemberEventIDs: memberIDs,
+	}}}, &res)
+	if res.ErrMsg != "" {
+		return fmt.Errorf("adding the memberships: %s", res.ErrMsg)
+	}
+	return nil
 }
 
 // userLeft reports whether the user is no longer joined to the room: the state could not be stored by an event of

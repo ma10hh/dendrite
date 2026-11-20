@@ -112,3 +112,35 @@ func (s *OutputRoomEventConsumer) currentMembership(ctx context.Context, roomID,
 	succeeded = err == nil
 	return ev, err
 }
+
+// onMembersAdded stores the memberships that a room joined with partial state was missing. They are as old as the
+// join, so they are stored at its position: clients are not told about a change in the room, and the members show in
+// the state that is read afterwards.
+func (s *OutputRoomEventConsumer) onMembersAdded(ctx context.Context, msg api.OutputMembersAdded) error {
+	if len(msg.Members) == 0 {
+		return nil
+	}
+	snapshot, err := s.db.NewDatabaseSnapshot(ctx)
+	if err != nil {
+		return err
+	}
+	topo, pos, err := snapshot.PositionInTopology(ctx, msg.JoinEventID)
+	_ = snapshot.Rollback()
+	if err != nil {
+		return fmt.Errorf("the position of the join %s: %w", msg.JoinEventID, err)
+	}
+
+	members := make([]*rstypes.HeaderedEvent, 0, len(msg.Members))
+	for _, ev := range msg.Members {
+		if ev, err = s.updateStateEvent(ev); err != nil {
+			return err
+		}
+		userID, uerr := s.rsAPI.QueryUserIDForSender(ctx, ev.RoomID(), ev.SenderID())
+		if uerr != nil || userID == nil {
+			continue
+		}
+		ev.UserID = *userID
+		members = append(members, ev)
+	}
+	return s.db.AddResyncedMembers(ctx, members, pos, topo)
+}

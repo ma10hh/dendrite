@@ -155,6 +155,9 @@ type Database interface {
 	// creates a new row, else update the existing one
 	// Returns an error if there was an issue with the upsert
 	UpsertAccountData(ctx context.Context, userID, roomID, dataType string) (types.StreamPosition, error)
+	// AddResyncedMembers adds membership events to the current state of a room at the given positions, without adding
+	// them to the timeline.
+	AddResyncedMembers(ctx context.Context, members []*rstypes.HeaderedEvent, pduPosition, topoPosition types.StreamPosition) error
 	// AddInviteEvent stores a new invite event for a user.
 	// If the invite was successfully stored this returns the stream ID it was stored at.
 	// Returns an error if there was a problem communicating with the database.

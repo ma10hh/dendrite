@@ -24,6 +24,7 @@ import (
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/internal"
 	"github.com/element-hq/dendrite/roomserver/storage"
+	rstypes "github.com/element-hq/dendrite/roomserver/types"
 	"github.com/element-hq/dendrite/setup/jetstream"
 	"github.com/element-hq/dendrite/test"
 	"github.com/element-hq/dendrite/test/testrig"
@@ -135,6 +136,7 @@ func TestPartialStateResync(t *testing.T) {
 	room := test.NewRoom(t, admin, test.RoomVersion(gomatrixserverlib.RoomVersionV10), test.RoomPreset(test.PresetPublicChat))
 	bobJoin := room.CreateAndInsert(t, bob, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(bob.ID))
 	join := room.CreateAndInsert(t, local, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(local.ID))
+	next := room.CreateAndInsert(t, local, "m.room.message", map[string]string{"body": "after"})
 
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
 		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
@@ -173,6 +175,12 @@ func TestPartialStateResync(t *testing.T) {
 			return len(res.StateEvents)
 		}
 		assert.Equal(t, 0, memberOf(bob.ID), "bob is not in the state yet")
+		latest := func() []string {
+			res := api.QueryLatestEventsAndStateResponse{}
+			require.NoError(t, rsAPI.QueryLatestEventsAndState(ctx, &api.QueryLatestEventsAndStateRequest{RoomID: room.ID}, &res))
+			return res.LatestEvents
+		}
+		before := latest()
 
 		info, err := db.RoomInfo(ctx, room.ID)
 		require.NoError(t, err)
@@ -183,5 +191,13 @@ func TestPartialStateResync(t *testing.T) {
 		assert.GreaterOrEqual(t, int(fed.asked.Load()), 1)
 		assert.Equal(t, 1, memberOf(bob.ID), "bob is in the state")
 		assert.Equal(t, 1, memberOf(local.ID))
+		assert.Equal(t, before, latest(), "no event was added to the room")
+
+		// An event that comes after starts from a state that has the members.
+		require.NoError(t, api.SendEvents(ctx, rsAPI, api.KindNew, []*rstypes.HeaderedEvent{next}, cfg.Global.ServerName, cfg.Global.ServerName, "test", nil, false))
+		assert.Equal(t, 1, memberOf(bob.ID), "bob is still in the state after a new event")
+		res := api.QueryMembershipsForRoomResponse{}
+		require.NoError(t, rsAPI.QueryMembershipsForRoom(ctx, &api.QueryMembershipsForRoomRequest{RoomID: room.ID, JoinedOnly: true}, &res))
+		assert.Len(t, res.JoinEvents, 3, "the creator, bob and the local user are joined")
 	})
 }

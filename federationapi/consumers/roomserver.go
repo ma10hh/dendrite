@@ -115,6 +115,11 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 			}).Panicf("roomserver output log: write room event failure")
 		}
 
+	case api.OutputTypeMembersAdded:
+		if err := s.processMembersAdded(*output.MembersAdded); err != nil {
+			log.WithFields(log.Fields{"room_id": output.MembersAdded.RoomID, log.ErrorKey: err}).Panicf("roomserver output log: members added failure")
+		}
+
 	case api.OutputTypeNewInboundPeek:
 		if err := s.processInboundPeek(*output.NewInboundPeek); err != nil {
 			log.WithFields(log.Fields{
@@ -552,4 +557,23 @@ func WithPartialStateHosts(hosts []types.JoinedHost, servers []string) []types.J
 		}
 	}
 	return hosts
+}
+
+// processMembersAdded replaces the servers that stood in for the members of a room joined with partial state by the
+// servers of the members that were fetched. Servers that have no member in the room do not get its events any more.
+func (s *OutputRoomEventConsumer) processMembersAdded(msg api.OutputMembersAdded) error {
+	evs := make([]gomatrixserverlib.PDU, len(msg.Members))
+	for i := range msg.Members {
+		evs[i] = msg.Members[i].PDU
+	}
+	hosts, err := JoinedHostsFromEvents(s.ctx, evs, s.rsAPI)
+	if err != nil {
+		return err
+	}
+	stand := make([]string, 0, len(msg.Servers))
+	for _, server := range msg.Servers {
+		stand = append(stand, partialStateHostPrefix+server)
+	}
+	_, err = s.db.UpdateRoom(s.ctx, msg.RoomID, hosts, stand, false)
+	return err
 }

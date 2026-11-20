@@ -55,6 +55,8 @@ const (
 	OutputTypeRetirePeek OutputType = "retire_peek"
 	// OutputTypePurgeRoom indicates the event is an OutputPurgeRoom
 	OutputTypePurgeRoom OutputType = "purge_room"
+	// OutputTypeMembersAdded indicates that the event is an OutputMembersAdded
+	OutputTypeMembersAdded OutputType = "members_added"
 )
 
 // An OutputEvent is an entry in the roomserver output kafka log.
@@ -84,6 +86,8 @@ type OutputEvent struct {
 	RetirePeek *OutputRetirePeek `json:"retire_peek,omitempty"`
 	// The content of the event with type OutputPurgeRoom
 	PurgeRoom *OutputPurgeRoom `json:"purge_room,omitempty"`
+	// The content of the event with type OutputTypeMembersAdded
+	MembersAdded *OutputMembersAdded `json:"members_added,omitempty"`
 }
 
 // Type of the OutputNewRoomEvent.
@@ -210,6 +214,19 @@ type OutputNewInviteEvent struct {
 	RoomVersion gomatrixserverlib.RoomVersion `json:"room_version"`
 	// The "m.room.member" invite event.
 	Event *types.HeaderedEvent `json:"event"`
+}
+
+// An OutputMembersAdded is written when the memberships that a room joined with partial state was missing have been
+// added to its state. They are not new: they are as old as the join, so consumers add them to the state of the room
+// without telling clients about a change.
+type OutputMembersAdded struct {
+	RoomID string `json:"room_id"`
+	// The join event of the local user that joined the room.
+	JoinEventID string `json:"join_event_id"`
+	// The servers the room was joined through and that were in it, which were assumed to have members before.
+	Servers []string `json:"servers"`
+	// The membership events that were added.
+	Members []*types.HeaderedEvent `json:"members"`
 }
 
 // An OutputNewKnockEvent is written when a local user knocked on a room that this server is not in. Like an invite,

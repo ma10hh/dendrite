@@ -37,6 +37,11 @@ const (
 	// considered for forward extremities, and output events will NOT
 	// be generated for them.
 	KindOld
+	// KindAddMembers adds the memberships of a room that was joined with partial state to its state, without a new
+	// event: the state of the room, and of its latest events, gets the memberships in MemberEventIDs that it does not
+	// have. Event is the join event, which only names the room, and the events must have been input as outliers
+	// before. Nothing is sent to other servers.
+	KindAddMembers
 )
 
 func (k Kind) String() string {
@@ -47,6 +52,8 @@ func (k Kind) String() string {
 		return "KindNew"
 	case KindOld:
 		return "KindOld"
+	case KindAddMembers:
+		return "KindAddMembers"
 	default:
 		return "(unknown)"
 	}
@@ -83,6 +90,8 @@ type InputRoomEvent struct {
 	// If set, the state of this event leaves out the memberships of the room (the join of a server that asked for
 	// that), and these are the servers in the room to fetch the rest from. Only used with HasState.
 	PartialStateServers []string `json:"partial_state_servers,omitempty"`
+	// With KindAddMembers, the membership events to add.
+	MemberEventIDs []string `json:"member_event_ids,omitempty"`
 }
 
 // TransactionID contains the transaction ID sent by a client when sending an

@@ -122,6 +122,8 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 		}
 	case api.OutputTypeOldRoomEvent:
 		err = s.onOldRoomEvent(s.ctx, *output.OldRoomEvent)
+	case api.OutputTypeMembersAdded:
+		err = s.onMembersAdded(s.ctx, *output.MembersAdded)
 	case api.OutputTypeNewKnockEvent:
 		err = s.onNewKnockEvent(s.ctx, *output.NewKnockEvent)
 	case api.OutputTypeRetireKnockEvent:

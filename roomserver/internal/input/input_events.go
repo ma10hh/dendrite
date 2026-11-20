@@ -124,6 +124,9 @@ func (r *Inputer) processRoomEvent(
 	if roomInfo == nil && !isCreateEvent {
 		return fmt.Errorf("room %s does not exist for event %s", event.RoomID().String(), event.EventID())
 	}
+	if input.Kind == api.KindAddMembers {
+		return r.addMembers(ctx, input)
+	}
 	sender, err := r.Queryer.QueryUserIDForSender(ctx, event.RoomID(), event.SenderID())
 	if err != nil {
 		return fmt.Errorf("failed getting userID for sender %q. %w", event.SenderID(), err)

@@ -627,3 +627,13 @@ func (d *Database) SelectMemberships(
 ) (eventIDs []string, err error) {
 	return d.Memberships.SelectMemberships(ctx, nil, roomID, pos, membership, notMembership)
 }
+
+// AddResyncedMembers adds membership events to the current state of a room at the given positions, without adding
+// them to the timeline.
+func (d *Database) AddResyncedMembers(
+	ctx context.Context, members []*rstypes.HeaderedEvent, pduPosition, topoPosition types.StreamPosition,
+) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		return d.updateRoomState(ctx, txn, nil, members, pduPosition, topoPosition)
+	})
+}
