@@ -6,6 +6,7 @@
  - Dendrite now refuses a configuration with duplicate keys or keys it does not know, and names them with their line numbers. Before, the last of two blocks with the same key silently won and misspelled or removed options (for example `kafka`, `server_key_api` or `pusher_database` from older versions) were ignored. Remove them, or run `generate-config -normalise dendrite.yaml` to write the file out again in the current form: it still reads old configurations. Application service registration files are not affected.
 
 ### Features
+ - Add the part of the Synapse admin API that synapse-admin and Draupnir use, at `/_synapse/admin`: users (list, create, change, deactivate, reset password, devices, joined rooms), rooms (list, details, members, state, delete), media (quarantine, delete, list by user), registration tokens and the server version. See `docs/administration/8_synapse_adminapi.md` for what is not supported.
  - Add `federation_api.partial_state_joins` (off, experimental, do not enable yet): rooms of other servers are joined without their memberships, which are fetched in the background ([MSC3706](https://github.com/matrix-org/matrix-spec-proposals/pull/3706)). Servers can ask this server for `send_join` with `omit_members`.
  - Bundle the aggregations of relations with events: the thread summary, the latest edit and the references, in `unsigned["m.relations"]`, in `/messages`, `/context`, `/event`, `/relations`, `/search`, in `/sync` for timelines with a gap and in sliding sync. The content of edited events is not replaced.
  - Add knocking: `POST /_matrix/client/v3/knock/{roomIdOrAlias}`, for rooms of this server and of other servers, leaving a room withdraws the knock, and the federation endpoints `make_knock` and `send_knock` let users of other servers knock on rooms of this server.
@@ -23,6 +24,8 @@
 
 
 ### Bug fixes
+ - Updating a registration token (`uses_allowed`, `expiry_time`) did nothing on SQLite, because SQLite numbered the parameters of the statement by order of appearance.
+ - The federation sender no longer panics on an event of a room that was purged, or when the server is shutting down.
  - On SQLite, the `types` and `not_types` of event filters ignored a `*` at the end of a type (`m.room.*`), as Postgres does not.
  - `/context` returns the state after the last event it returns instead of the current state, all of it also with `lazy_load_members` (which then only limits the members), and no longer cuts it to `limit`.
  - `/publicRooms` over federation no longer lists empty entries for rooms it could not read.
