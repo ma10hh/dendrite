@@ -46,6 +46,7 @@ type Database struct {
 	MembershipTable    tables.Membership
 	PublishedTable     tables.Published
 	PartialStateTable  tables.PartialStateRooms
+	PartialStateEvents tables.PartialStateEvents
 	Purge              tables.Purge
 	UserRoomKeyTable   tables.UserRoomKeys
 	GetRoomUpdaterFn   func(ctx context.Context, roomInfo *types.RoomInfo) (*RoomUpdater, error)
@@ -2300,5 +2301,24 @@ func (d *Database) PartialStateRooms(ctx context.Context) ([]types.PartialState,
 func (d *Database) ClearRoomPartialState(ctx context.Context, roomNID types.RoomNID) error {
 	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
 		return d.PartialStateTable.DeletePartialState(ctx, txn, roomNID)
+	})
+}
+
+// RecordPartialStateEvent notes that the event was stored while the state of its room was partial.
+func (d *Database) RecordPartialStateEvent(ctx context.Context, roomNID types.RoomNID, eventNID types.EventNID, recheck bool) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		return d.PartialStateEvents.InsertPartialStateEvent(ctx, txn, roomNID, eventNID, recheck)
+	})
+}
+
+// PartialStateEventsOfRoom returns the events that were stored while the room had partial state, the oldest first.
+func (d *Database) PartialStateEventsOfRoom(ctx context.Context, roomNID types.RoomNID) ([]types.PartialStateEvent, error) {
+	return d.PartialStateEvents.SelectPartialStateEvents(ctx, nil, roomNID)
+}
+
+// ForgetPartialStateEvents removes the notes of the events of the room.
+func (d *Database) ForgetPartialStateEvents(ctx context.Context, roomNID types.RoomNID) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		return d.PartialStateEvents.DeletePartialStateEvents(ctx, txn, roomNID)
 	})
 }

@@ -376,3 +376,10 @@ type PartialState struct {
 	// JoinedAt is when the join happened, in milliseconds since the epoch.
 	JoinedAt int64
 }
+
+// PartialStateEvent is an event that was stored while the state of its room was partial.
+type PartialStateEvent struct {
+	EventNID EventNID
+	// Recheck is set if the event was accepted without being checked against the state before it.
+	Recheck bool
+}

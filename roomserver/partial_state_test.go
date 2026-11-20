@@ -7,6 +7,8 @@ package roomserver_test
 
 import (
 	"context"
+	"fmt"
+	"sort"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -24,6 +26,7 @@ import (
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/internal"
 	"github.com/element-hq/dendrite/roomserver/storage"
+	"github.com/element-hq/dendrite/roomserver/types"
 	rstypes "github.com/element-hq/dendrite/roomserver/types"
 	"github.com/element-hq/dendrite/setup/jetstream"
 	"github.com/element-hq/dendrite/test"
@@ -200,4 +203,130 @@ func TestPartialStateResync(t *testing.T) {
 		require.NoError(t, rsAPI.QueryMembershipsForRoom(ctx, &api.QueryMembershipsForRoomRequest{RoomID: room.ID, JoinedOnly: true}, &res))
 		assert.Len(t, res.JoinEvents, 3, "the creator, bob and the local user are joined")
 	})
+}
+
+// Events that arrive while the room has partial state are accepted if their auth events allow them, even when the
+// membership of their sender is not in the state yet, and checked against the full state when it is.
+func TestPartialStateEventsAreChecked(t *testing.T) {
+	admin := test.NewUser(t, test.WithSigningServer("remote.example", "ed25519:r", test.PrivateKeyB))
+	yUser := test.NewUser(t, test.WithSigningServer("second.example", "ed25519:s", test.PrivateKeyA))
+	zUser := test.NewUser(t, test.WithSigningServer("third.example", "ed25519:z", test.PrivateKeyA))
+	local := test.NewUser(t)
+
+	room := test.NewRoom(t, admin, test.RoomVersion(gomatrixserverlib.RoomVersionV10), test.RoomPreset(test.PresetPublicChat))
+	room.CreateAndInsert(t, yUser, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(yUser.ID))
+	zJoin := room.CreateAndInsert(t, zUser, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(zUser.ID))
+	room.CreateAndInsert(t, zUser, spec.MRoomMember, map[string]string{"membership": "leave"}, test.WithStateKey(zUser.ID))
+	join := room.CreateAndInsert(t, local, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(local.ID))
+	fromAdmin := room.CreateAndInsert(t, admin, "m.room.message", map[string]string{"body": "from the creator"})
+	fromY := room.CreateAndInsert(t, yUser, "m.room.message", map[string]string{"body": "from y"})
+
+	// z left before we joined, but its message cites the join, which is what a server that did not know would send.
+	var createID, plID string
+	for _, ev := range room.Events() {
+		switch ev.Type() {
+		case spec.MRoomCreate:
+			createID = ev.EventID()
+		case spec.MRoomPowerLevels:
+			plID = ev.EventID()
+		}
+	}
+	zKey := test.PrivateKeyA
+	proto := gomatrixserverlib.ProtoEvent{
+		SenderID: zUser.ID, RoomID: room.ID, Type: "m.room.message", Depth: fromY.Depth() + 1,
+		PrevEvents: []string{fromY.EventID()}, AuthEvents: []string{createID, plID, zJoin.EventID()},
+	}
+	require.NoError(t, proto.SetContent(map[string]string{"body": "from z, who left"}))
+	fromZ, err := gomatrixserverlib.MustGetRoomVersion(gomatrixserverlib.RoomVersionV10).NewEventBuilderFromProtoEvent(&proto).
+		Build(time.Now(), "third.example", "ed25519:z", zKey)
+	require.NoError(t, err)
+
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
+		defer closeFn()
+		cfg.RoomServer.PartialStateResyncInterval = time.Hour // the test decides when
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		natsInstance := jetstream.NATSInstance{}
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+
+		var partial, full, authChain []gomatrixserverlib.PDU
+		var members []*rstypes.HeaderedEvent
+		for _, ev := range room.CurrentState() {
+			full = append(full, ev.PDU)
+			if ev.Type() != spec.MRoomMember {
+				partial = append(partial, ev.PDU)
+			} else if ev.StateKey() != nil && *ev.StateKey() == admin.ID {
+				authChain = append(authChain, ev.PDU) // the power levels name it as an auth event
+			}
+		}
+		for _, ev := range room.Events() {
+			if ev.Type() == spec.MRoomMember && ev.EventID() != join.EventID() {
+				members = append(members, ev)
+			}
+		}
+		sort.Slice(members, func(i, j int) bool { return members[i].Depth() < members[j].Depth() })
+		fed := &fakeStateFederation{state: full}
+		rsAPI.SetFederationAPI(fed, nil)
+		internalAPI := rsAPI.(*internal.RoomserverInternalAPI)
+		internalAPI.Inputer.KeyRing = &test.NopJSONVerifier{}
+		db, err := storage.Open(processCtx.Context(), cm, &cfg.RoomServer.Database, caches)
+		require.NoError(t, err)
+		ctx := context.Background()
+
+		require.NoError(t, api.SendEventWithPartialState(
+			ctx, rsAPI, cfg.Global.ServerName, api.KindNew,
+			&fclient.RespState{
+				StateEvents: gomatrixserverlib.NewEventJSONsFromEvents(partial),
+				AuthEvents:  gomatrixserverlib.NewEventJSONsFromEvents(authChain),
+			},
+			join, "remote.example", nil, false, []string{"remote.example"},
+		))
+		// The events that the auth events of the next ones name were fetched with them.
+		for _, ev := range members {
+			require.NoError(t, api.SendEvents(ctx, rsAPI, api.KindOutlier, []*rstypes.HeaderedEvent{ev}, cfg.Global.ServerName, "remote.example", "", nil, false))
+		}
+		for _, ev := range []*rstypes.HeaderedEvent{fromAdmin, fromY, {PDU: fromZ}} {
+			require.NoError(t, api.SendEvents(ctx, rsAPI, api.KindNew, []*rstypes.HeaderedEvent{ev}, cfg.Global.ServerName, "remote.example", "", nil, false),
+				"the event of a member that is not in the partial state is accepted: %s (admin %s, y %s, z %s)", ev.EventID(), fromAdmin.EventID(), fromY.EventID(), fromZ.EventID())
+		}
+
+		info, err := db.RoomInfo(ctx, room.ID)
+		require.NoError(t, err)
+		recorded, err := db.PartialStateEventsOfRoom(ctx, info.RoomNID)
+		require.NoError(t, err)
+		assert.Len(t, recorded, 3, "the events are noted")
+		for _, e := range recorded {
+			assert.True(t, e.Recheck, "they were accepted without the check against the state")
+		}
+		rejected := func(id string) bool {
+			r, rerr := db.IsEventRejected(ctx, info.RoomNID, id)
+			require.NoError(t, rerr)
+			return r
+		}
+		assert.False(t, rejected(fromZ.EventID()), "not rejected yet")
+
+		require.NoError(t, internalAPI.PartialStateResyncer.Resync(ctx, types.PartialState{
+			RoomNID: info.RoomNID, JoinEventID: join.EventID(), Servers: []string{"remote.example"},
+		}))
+
+		assert.False(t, rejected(fromAdmin.EventID()))
+		assert.False(t, rejected(fromY.EventID()))
+		assert.True(t, rejected(fromZ.EventID()), "z had left, so the full state does not allow its event")
+		recorded, err = db.PartialStateEventsOfRoom(ctx, info.RoomNID)
+		require.NoError(t, err)
+		assert.Empty(t, recorded, "the notes are gone")
+
+		// The state before the event now has the member who sent it.
+		res := api.QueryStateAfterEventsResponse{}
+		require.NoError(t, rsAPI.QueryStateAfterEvents(ctx, &api.QueryStateAfterEventsRequest{
+			RoomID: room.ID, PrevEventIDs: []string{fromAdmin.EventID()},
+			StateToFetch: []gomatrixserverlib.StateKeyTuple{{EventType: spec.MRoomMember, StateKey: admin.ID}, {EventType: spec.MRoomMember, StateKey: yUser.ID}},
+		}, &res))
+		assert.Len(t, res.StateEvents, 2)
+	})
+}
+
+func (f *fakeStateFederation) GetEventAuth(_ context.Context, _, _ spec.ServerName, _ gomatrixserverlib.RoomVersion, _, eventID string) (fclient.RespEventAuth, error) {
+	return fclient.RespEventAuth{}, fmt.Errorf("the fake server has no auth chain for %s", eventID)
 }

@@ -267,6 +267,9 @@ type PartialState interface {
 	PartialStateOfRoom(ctx context.Context, roomNID types.RoomNID) (*types.PartialState, error)
 	PartialStateRooms(ctx context.Context) ([]types.PartialState, error)
 	ClearRoomPartialState(ctx context.Context, roomNID types.RoomNID) error
+	RecordPartialStateEvent(ctx context.Context, roomNID types.RoomNID, eventNID types.EventNID, recheck bool) error
+	PartialStateEventsOfRoom(ctx context.Context, roomNID types.RoomNID) ([]types.PartialStateEvent, error)
+	ForgetPartialStateEvents(ctx context.Context, roomNID types.RoomNID) error
 }
 
 type ReportedEvents interface {

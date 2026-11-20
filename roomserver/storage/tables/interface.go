@@ -57,6 +57,7 @@ type Events interface {
 	// If we do not have the state for any of the requested events it returns a types.MissingEventError.
 	BulkSelectStateAtEventByID(ctx context.Context, txn *sql.Tx, eventIDs []string) ([]types.StateAtEvent, error)
 	UpdateEventState(ctx context.Context, txn *sql.Tx, eventNID types.EventNID, stateNID types.StateSnapshotNID) error
+	UpdateEventRejected(ctx context.Context, txn *sql.Tx, eventNID types.EventNID, rejected bool) error
 	SelectEventSentToOutput(ctx context.Context, txn *sql.Tx, eventNID types.EventNID) (sentToOutput bool, err error)
 	UpdateEventSentToOutput(ctx context.Context, txn *sql.Tx, eventNID types.EventNID) error
 	SelectEventID(ctx context.Context, txn *sql.Tx, eventNID types.EventNID) (eventID string, err error)
@@ -287,4 +288,14 @@ type PartialStateRooms interface {
 	SelectAllPartialState(ctx context.Context, txn *sql.Tx) ([]types.PartialState, error)
 	// DeletePartialState removes the mark of the room.
 	DeletePartialState(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) error
+}
+
+// PartialStateEvents are the events that were stored while the state of their room was partial. Their state before
+// them lacks the memberships that were left out, and the events with Recheck set were accepted without being checked
+// against the state before them, because it could not be done.
+type PartialStateEvents interface {
+	InsertPartialStateEvent(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID, eventNID types.EventNID, recheck bool) error
+	// SelectPartialStateEvents returns the events of the room, the oldest first.
+	SelectPartialStateEvents(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) ([]types.PartialStateEvent, error)
+	DeletePartialStateEvents(ctx context.Context, txn *sql.Tx, roomNID types.RoomNID) error
 }

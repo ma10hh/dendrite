@@ -331,6 +331,18 @@ func (r *Inputer) processRoomEvent(
 		}
 	}
 
+	// While the state of the room is partial, the checks against the state of the room cannot be made for events of
+	// members whose membership was left out. They are made when the memberships have been added.
+	partialRoom := false
+	if roomInfo != nil && input.Kind != api.KindOutlier && !isCreateEvent {
+		partialState, perr := r.DB.PartialStateOfRoom(ctx, roomInfo.RoomNID)
+		if perr != nil {
+			return fmt.Errorf("r.DB.PartialStateOfRoom: %w", perr)
+		}
+		partialRoom = partialState != nil
+	}
+	provisional := false
+
 	var softfail bool
 	if input.Kind == api.KindNew && !isCreateEvent {
 		// Check that the event passes authentication checks based on the
@@ -338,6 +350,9 @@ func (r *Inputer) processRoomEvent(
 		softfail, err = helpers.CheckForSoftFail(ctx, r.DB, roomInfo, headered, input.StateEventIDs, r.Queryer)
 		if err != nil {
 			logger.WithError(err).Warn("Error authing soft-failed event")
+		}
+		if softfail && partialRoom {
+			softfail, provisional = false, true
 		}
 	}
 
@@ -347,10 +362,12 @@ func (r *Inputer) processRoomEvent(
 	// burning CPU time.
 	historyVisibility := gomatrixserverlib.HistoryVisibilityShared // Default to shared.
 	if input.Kind != api.KindOutlier && rejectionErr == nil && !isRejected && !isCreateEvent {
-		historyVisibility, rejectionErr, err = r.processStateBefore(ctx, roomInfo, input, missingPrev)
+		var stateProvisional bool
+		historyVisibility, rejectionErr, stateProvisional, err = r.processStateBefore(ctx, roomInfo, input, missingPrev, partialRoom)
 		if err != nil {
 			return fmt.Errorf("r.processStateBefore: %w", err)
 		}
+		provisional = provisional || stateProvisional
 		if rejectionErr != nil {
 			isRejected = true
 		}
@@ -386,6 +403,12 @@ func (r *Inputer) processRoomEvent(
 		logger.WithField("rejected", isRejected).Debug("Stored outlier")
 		hooks.Run(hooks.KindNewEventPersisted, headered)
 		return nil
+	}
+
+	if partialRoom && !isRejected {
+		if err = r.DB.RecordPartialStateEvent(ctx, roomInfo.RoomNID, eventNID, provisional); err != nil {
+			return fmt.Errorf("r.DB.RecordPartialStateEvent: %w", err)
+		}
 	}
 
 	// Request the room info again — it's possible that the room has been
@@ -585,8 +608,8 @@ func (r *Inputer) processStateBefore(
 	ctx context.Context,
 	roomInfo *types.RoomInfo,
 	input *api.InputRoomEvent,
-	missingPrev bool,
-) (historyVisibility gomatrixserverlib.HistoryVisibility, rejectionErr error, err error) {
+	missingPrev, partialRoom bool,
+) (historyVisibility gomatrixserverlib.HistoryVisibility, rejectionErr error, provisional bool, err error) {
 	historyVisibility = gomatrixserverlib.HistoryVisibilityShared // Default to shared.
 	event := input.Event.PDU
 	isCreateEvent := event.Type() == spec.MRoomCreate && event.StateKeyEquals("")
@@ -602,7 +625,7 @@ func (r *Inputer) processStateBefore(
 		var stateEvents []types.Event
 		stateEvents, err = r.DB.EventsFromIDs(ctx, roomInfo, input.StateEventIDs)
 		if err != nil {
-			return "", nil, fmt.Errorf("r.DB.EventsFromIDs: %w", err)
+			return "", nil, false, fmt.Errorf("r.DB.EventsFromIDs: %w", err)
 		}
 		stateBeforeEvent = make([]gomatrixserverlib.PDU, 0, len(stateEvents))
 		for _, entry := range stateEvents {
@@ -637,7 +660,7 @@ func (r *Inputer) processStateBefore(
 		}
 		stateBeforeRes := &api.QueryStateAfterEventsResponse{}
 		if err = r.Queryer.QueryStateAfterEvents(ctx, stateBeforeReq, stateBeforeRes); err != nil {
-			return "", nil, fmt.Errorf("r.Queryer.QueryStateAfterEvents: %w", err)
+			return "", nil, false, fmt.Errorf("r.Queryer.QueryStateAfterEvents: %w", err)
 		}
 		switch {
 		case !stateBeforeRes.RoomExists:
@@ -664,11 +687,19 @@ func (r *Inputer) processStateBefore(
 		rejectionErr = fmt.Errorf("NewAuthEvents failed: %w", err)
 		return
 	}
-	if rejectionErr = gomatrixserverlib.Allowed(event, stateBeforeAuth, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
+	userIDForSender := func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return r.Queryer.QueryUserIDForSender(ctx, roomID, senderID)
-	}); rejectionErr != nil {
-		rejectionErr = fmt.Errorf("Allowed() failed for stateBeforeEvent: %w", rejectionErr)
-		return
+	}
+	if rejectionErr = gomatrixserverlib.Allowed(event, stateBeforeAuth, userIDForSender); rejectionErr != nil {
+		// With partial state the memberships of the senders may be missing. The auth events of the event name them, and
+		// they were checked against the event already: if the event is allowed with them, it is accepted until the
+		// memberships have been added and it can be checked against the state.
+		if partialRoom && !input.HasState && r.allowedWithAuthMemberships(ctx, roomInfo, event, stateBeforeEvent, userIDForSender) {
+			rejectionErr, provisional = nil, true
+		} else {
+			rejectionErr = fmt.Errorf("Allowed() failed for stateBeforeEvent: %w", rejectionErr)
+			return
+		}
 	}
 	// Work out what the history visibility was at the time of the
 	// event.

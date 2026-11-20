@@ -98,6 +98,9 @@ func TestSendJoinOmitMembers(t *testing.T) {
 			assert.ElementsMatch(t, []string{carol.ID}, got, "only the users of the joining server stay (dave joined after the state was read)")
 			assert.NotContains(t, got, alice.ID)
 			assert.NotContains(t, got, bob.ID)
+			// The creator is not in the state, but the power levels name its membership as an auth event.
+			assert.Contains(t, members(toRaw(res.AuthEvents)), alice.ID, "the auth chain of what stays is complete")
+			assert.NotContains(t, members(toRaw(res.AuthEvents)), bob.ID, "memberships nothing needs are left out")
 			// The state that is not about members is whole.
 			var types []string
 			for _, raw := range res.StateEvents {

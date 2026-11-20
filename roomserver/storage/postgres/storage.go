@@ -132,6 +132,9 @@ func (d *Database) create(db *sql.DB) error {
 	if err := CreatePartialStateTable(db); err != nil {
 		return err
 	}
+	if err := CreatePartialStateEventsTable(db); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -205,6 +208,10 @@ func (d *Database) prepare(db *sql.DB, writer sqlutil.Writer, cache caching.Room
 	if err != nil {
 		return err
 	}
+	partialStateEvents, err := PreparePartialStateEventsTable(db)
+	if err != nil {
+		return err
+	}
 
 	d.Database = shared.Database{
 		DB: db,
@@ -232,6 +239,7 @@ func (d *Database) prepare(db *sql.DB, writer sqlutil.Writer, cache caching.Room
 		Purge:              purge,
 		UserRoomKeyTable:   userRoomKeys,
 		PartialStateTable:  partialState,
+		PartialStateEvents: partialStateEvents,
 	}
 	return nil
 }

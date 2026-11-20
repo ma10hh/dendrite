@@ -254,3 +254,15 @@ func (u *RoomUpdater) MembershipUpdater(targetUserNID types.EventStateKeyNID, ta
 func (u *RoomUpdater) IsEventRejected(ctx context.Context, roomNID types.RoomNID, eventID string) (bool, error) {
 	return u.d.IsEventRejected(ctx, roomNID, eventID)
 }
+
+// SetEventRejected marks an event as rejected, or not.
+func (u *RoomUpdater) SetEventRejected(ctx context.Context, eventNID types.EventNID, rejected bool) error {
+	return u.d.Writer.Do(u.d.DB, u.txn, func(txn *sql.Tx) error {
+		return u.d.EventsTable.UpdateEventRejected(ctx, txn, eventNID, rejected)
+	})
+}
+
+// PartialStateEvents returns the events of the room that were stored while its state was partial.
+func (u *RoomUpdater) PartialStateEvents(ctx context.Context, roomNID types.RoomNID) ([]types.PartialStateEvent, error) {
+	return u.d.PartialStateEvents.SelectPartialStateEvents(ctx, u.txn, roomNID)
+}

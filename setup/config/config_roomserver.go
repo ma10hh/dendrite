@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/matrix-org/gomatrixserverlib"
 	log "github.com/sirupsen/logrus"
@@ -13,6 +14,10 @@ type RoomServer struct {
 	DefaultRoomVersion gomatrixserverlib.RoomVersion `yaml:"default_room_version,omitempty"`
 
 	Database DatabaseOptions `yaml:"database,omitempty"`
+
+	// PartialStateResyncInterval is how often rooms joined with partial state are looked at, two seconds if zero. Not
+	// in the configuration file: tests set it.
+	PartialStateResyncInterval time.Duration `yaml:"-"`
 }
 
 func (c *RoomServer) Defaults(opts DefaultOpts) {

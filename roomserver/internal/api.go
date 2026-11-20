@@ -215,7 +215,7 @@ func (r *RoomserverInternalAPI) SetFederationAPI(fsAPI fsAPI.RoomserverFederatio
 		Cfg:   &r.Cfg.RoomServer,
 		RSAPI: r,
 	}
-	r.PartialStateResyncer = &perform.PartialStateResyncer{DB: r.DB, Admin: r.Admin}
+	r.PartialStateResyncer = &perform.PartialStateResyncer{DB: r.DB, Admin: r.Admin, Interval: r.Cfg.RoomServer.PartialStateResyncInterval}
 
 	if err := r.Inputer.Start(); err != nil {
 		logrus.WithError(err).Panic("failed to start roomserver input API")
