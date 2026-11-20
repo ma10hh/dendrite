@@ -54,6 +54,8 @@ func Setup(
 	v1mux := routers.Client.PathPrefix("/v1/media/").Subrouter()
 	v1fedMux := routers.Federation.PathPrefix("/v1/media/").Subrouter()
 
+	setupSynapseAdmin(routers, cfg, db, userAPI)
+
 	activeThumbnailGeneration := &types.ActiveThumbnailGeneration{
 		PathToResult: map[string]*types.ThumbnailGenerationResult{},
 	}

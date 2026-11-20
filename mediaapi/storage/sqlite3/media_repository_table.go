@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/element-hq/dendrite/internal/sqlutil"
+	"github.com/element-hq/dendrite/mediaapi/storage/sqlite3/deltas"
 	"github.com/element-hq/dendrite/mediaapi/storage/tables"
 	"github.com/element-hq/dendrite/mediaapi/types"
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -50,11 +51,11 @@ INSERT INTO mediaapi_media_repository (media_id, media_origin, content_type, fil
 `
 
 const selectMediaSQL = `
-SELECT content_type, file_size_bytes, creation_ts, upload_name, base64hash, user_id FROM mediaapi_media_repository WHERE media_id = $1 AND media_origin = $2
+SELECT content_type, file_size_bytes, creation_ts, upload_name, base64hash, user_id, quarantined FROM mediaapi_media_repository WHERE media_id = $1 AND media_origin = $2
 `
 
 const selectMediaByHashSQL = `
-SELECT content_type, file_size_bytes, creation_ts, upload_name, media_id, user_id FROM mediaapi_media_repository WHERE base64hash = $1 AND media_origin = $2
+SELECT content_type, file_size_bytes, creation_ts, upload_name, media_id, user_id, quarantined FROM mediaapi_media_repository WHERE base64hash = $1 AND media_origin = $2
 `
 
 type mediaStatements struct {
@@ -70,6 +71,11 @@ func NewSQLiteMediaRepositoryTable(db *sql.DB) (tables.MediaRepository, error) {
 	}
 	_, err := db.Exec(mediaSchema)
 	if err != nil {
+		return nil, err
+	}
+	m := sqlutil.NewMigrator(db)
+	m.AddMigrations(sqlutil.Migration{Version: "mediaapi: quarantined", Up: deltas.UpQuarantined})
+	if err = m.Up(context.Background()); err != nil {
 		return nil, err
 	}
 
@@ -114,6 +120,7 @@ func (s *mediaStatements) SelectMedia(
 		&mediaMetadata.UploadName,
 		&mediaMetadata.Base64Hash,
 		&mediaMetadata.UserID,
+		&mediaMetadata.Quarantined,
 	)
 	return &mediaMetadata, err
 }
@@ -134,6 +141,7 @@ func (s *mediaStatements) SelectMediaByHash(
 		&mediaMetadata.UploadName,
 		&mediaMetadata.MediaID,
 		&mediaMetadata.UserID,
+		&mediaMetadata.Quarantined,
 	)
 	return &mediaMetadata, err
 }

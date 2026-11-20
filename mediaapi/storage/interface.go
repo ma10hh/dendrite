@@ -16,6 +16,16 @@ import (
 type Database interface {
 	MediaRepository
 	Thumbnails
+	MediaAdmin
+}
+
+// MediaAdmin is what the admin API does with media.
+type MediaAdmin interface {
+	SetMediaQuarantined(ctx context.Context, mediaID types.MediaID, origin spec.ServerName, quarantined bool) (bool, error)
+	SetUserMediaQuarantined(ctx context.Context, userID string, quarantined bool) (int64, error)
+	ListUserMedia(ctx context.Context, userID string, from, limit int, orderBy string, backwards bool) ([]types.MediaMetadata, int, error)
+	MediaToDelete(ctx context.Context, origin spec.ServerName, beforeTS spec.Timestamp, largerThan int64) ([]types.MediaMetadata, error)
+	DeleteMedia(ctx context.Context, mediaID types.MediaID, origin spec.ServerName) (meta *types.MediaMetadata, fileInUse bool, err error)
 }
 
 type MediaRepository interface {

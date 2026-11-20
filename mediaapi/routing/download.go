@@ -281,6 +281,10 @@ func (r *downloadRequest) doDownload(
 			return nil, resErr
 		}
 	} else {
+		// Quarantined media is answered as if it was not there.
+		if mediaMetadata.Quarantined {
+			return nil, nil
+		}
 		// If we have a record, we can respond from the local file
 		r.MediaMetadata = mediaMetadata
 	}

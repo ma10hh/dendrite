@@ -47,6 +47,8 @@ type MediaMetadata struct {
 	UploadName        Filename
 	Base64Hash        Base64Hash
 	UserID            MatrixUserID
+	// Quarantined media is not served.
+	Quarantined bool
 }
 
 // RemoteRequestResult is used for broadcasting the result of a request for a remote file to routines waiting on the condition
