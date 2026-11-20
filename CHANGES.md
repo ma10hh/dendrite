@@ -7,6 +7,7 @@
 
 ### Features
  - Add the part of the Synapse admin API that synapse-admin and Draupnir use, at `/_synapse/admin`: users (list, create, change, deactivate, reset password, devices, joined rooms), rooms (list, details, members, state, delete), media (quarantine, delete, list by user), registration tokens and the server version. See `docs/administration/8_synapse_adminapi.md` for what is not supported.
+ - Add a block list for rooms: `PUT /_synapse/admin/v1/rooms/{roomId}/block` and `block` in the room deletion stop local users from joining or knocking on a room and refuse invites to it over federation.
  - Add `federation_api.partial_state_joins` (off, experimental, do not enable yet): rooms of other servers are joined without their memberships, which are fetched in the background ([MSC3706](https://github.com/matrix-org/matrix-spec-proposals/pull/3706)). Servers can ask this server for `send_join` with `omit_members`.
  - Bundle the aggregations of relations with events: the thread summary, the latest edit and the references, in `unsigned["m.relations"]`, in `/messages`, `/context`, `/event`, `/relations`, `/search`, in `/sync` for timelines with a gap and in sliding sync. The content of edited events is not replaced.
  - Add knocking: `POST /_matrix/client/v3/knock/{roomIdOrAlias}`, for rooms of this server and of other servers, leaving a room withdraws the knock, and the federation endpoints `make_knock` and `send_knock` let users of other servers knock on rooms of this server.
