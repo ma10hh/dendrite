@@ -105,6 +105,10 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 	case api.OutputTypeNewRoomEvent:
 		ev := output.NewRoomEvent.Event
 		if err := s.processMessage(*output.NewRoomEvent, output.NewRoomEvent.RewritesState); err != nil {
+			if s.ctx.Err() != nil {
+				// The server is shutting down: the event is tried again when it starts.
+				return false
+			}
 			// panic rather than continue with an inconsistent database
 			log.WithFields(log.Fields{
 				"event_id":   ev.EventID(),
@@ -181,6 +185,12 @@ func (s *OutputRoomEventConsumer) processMessage(ore api.OutputNewRoomEvent, rew
 			return fmt.Errorf("s.rsAPI.QueryEventsByID: %w", err)
 		}
 		if len(eventsRes.Events) != len(missingEventIDs) {
+			// An event of a room that has been purged since cannot be sent on: there is nothing left to take it from.
+			var inRoom api.QueryServerJoinedToRoomResponse
+			if err := s.rsAPI.QueryServerJoinedToRoom(s.ctx, &api.QueryServerJoinedToRoomRequest{RoomID: ore.Event.RoomID().String()}, &inRoom); err == nil && !inRoom.RoomExists {
+				log.WithField("room_id", ore.Event.RoomID().String()).Warn("the room of an event to send was purged, dropping the event")
+				return nil
+			}
 			return fmt.Errorf("missing state events")
 		}
 		addsStateEvents = append(addsStateEvents, eventsRes.Events...)

@@ -47,13 +47,14 @@ const deleteTokenSQL = "" +
 	"DELETE FROM userapi_registration_tokens WHERE token = $1"
 
 const updateTokenUsesAllowedAndExpiryTimeSQL = "" +
-	"UPDATE userapi_registration_tokens SET uses_allowed = $2, expiry_time = $3 WHERE token = $1"
+	// ?N, not $N: SQLite numbers $N by order of appearance, which would take the token for the first value.
+	"UPDATE userapi_registration_tokens SET uses_allowed = ?2, expiry_time = ?3 WHERE token = ?1"
 
 const updateTokenUsesAllowedSQL = "" +
-	"UPDATE userapi_registration_tokens SET uses_allowed = $2 WHERE token = $1"
+	"UPDATE userapi_registration_tokens SET uses_allowed = ?2 WHERE token = ?1"
 
 const updateTokenExpiryTimeSQL = "" +
-	"UPDATE userapi_registration_tokens SET expiry_time = $2 WHERE token = $1"
+	"UPDATE userapi_registration_tokens SET expiry_time = ?2 WHERE token = ?1"
 
 type registrationTokenStatements struct {
 	selectTokenStatement                         *sql.Stmt
