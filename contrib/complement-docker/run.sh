@@ -29,6 +29,12 @@ fi
 
 if [ ! -d "$COMPLEMENT_DIR/.git" ]; then
   git clone https://github.com/matrix-org/complement "$COMPLEMENT_DIR"
+  touch "$COMPLEMENT_DIR/.git/dendrite-complement-docker"
+fi
+# The next step resets the clone, so it must be one that this script made, not a checkout somebody works in.
+if [ ! -e "$COMPLEMENT_DIR/.git/dendrite-complement-docker" ]; then
+  echo "$COMPLEMENT_DIR is not a clone made by this script: it would be reset. Use another COMPLEMENT_DIR." >&2
+  exit 1
 fi
 (
   cd "$COMPLEMENT_DIR"
