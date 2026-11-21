@@ -23,7 +23,7 @@ When a release is made, `## Unreleased` becomes `## Dendrite <version> (<date>)`
 
 1. The branch to release is merged and its CI is green: unit tests on SQLite and PostgreSQL, lint, and the upgrade test (`cmd/dendrite-upgrade-tests`).
 2. The lab passes: `contrib/mas-lab/run.sh` (and `SLOW=1` once in a while: it waits for a token to expire).
-3. Complement: build the image with `build/scripts/Complement.Dockerfile` and run `./tests ./tests/csapi` of [Complement](https://github.com/matrix-org/complement), compare the failures with the list in `docs/development/complement.md`. A test that passed before and fails now blocks the release.
+3. Complement: `contrib/complement-docker/run.sh` (it builds the image of the checkout and runs `./tests ./tests/csapi` of [Complement](https://github.com/matrix-org/complement) with working federation), compare the failures with the list in `docs/development/complement.md`. A test that passed before and fails now blocks the release.
 4. The fuzz tests run for a few minutes each, for example `go test ./roomserver/state -run XXX -fuzz FuzzResolveStateV2 -fuzztime 5m`; the files they write in `testdata` when they find something are committed with the fix.
 5. `CHANGES.md` is complete and the upgrade notes are read once more by someone who did not write them.
 6. The README's *Supported features* table is still true.

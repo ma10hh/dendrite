@@ -1,0 +1,150 @@
+diff --git a/config/config.go b/config/config.go
+index 9394b37..7d2331d 100644
+--- a/config/config.go
++++ b/config/config.go
+@@ -106,6 +106,14 @@ type Complement struct {
+ 	// like Podman that uses `host.containers.internal` instead.
+ 	HostnameRunningComplement string
+ 
++	// Name: COMPLEMENT_IN_DOCKER_NETWORK
++	// Default: 0
++	// Description: If 1, Complement itself runs in a container. The homeservers then reach it by the alias
++	// HostnameRunningComplement that Complement gives itself on the network of the deployment, not through the host,
++	// and Complement reaches them by their address on that network, not through published ports. This is for hosts whose
++	// firewall does not let containers connect to the host.
++	InDockerNetwork bool
++
+ 	// Name: COMPLEMENT_ENABLE_DIRTY_RUNS
+ 	// Default: 0
+ 	// Description: If 1, eligible tests will be provided with reusable deployments rather than a clean deployment.
+@@ -207,6 +215,8 @@ func NewConfigFromEnvVars(pkgNamespace, baseImageURI string) *Complement {
+ 		cfg.HostnameRunningComplement = "host.docker.internal"
+ 	}
+ 
++	cfg.InDockerNetwork = os.Getenv("COMPLEMENT_IN_DOCKER_NETWORK") == "1"
++
+ 	// HSPortBindingIP is fixed here, but used by homerunner to override.
+ 	cfg.HSPortBindingIP = "127.0.0.1"
+ 	return cfg
+diff --git a/internal/docker/builder.go b/internal/docker/builder.go
+index 8214521..5958bbe 100644
+--- a/internal/docker/builder.go
++++ b/internal/docker/builder.go
+@@ -18,6 +18,7 @@ import (
+ 	"fmt"
+ 	"log"
+ 	"net/netip"
++	"os"
+ 	"strings"
+ 	"time"
+ 
+@@ -240,6 +241,9 @@ func (d *Builder) construct(bprint b.Blueprint) (errs []error) {
+ 	if err != nil {
+ 		return []error{err}
+ 	}
++	if err = joinNetwork(d.Docker, networkName, d.Config); err != nil {
++		return []error{err}
++	}
+ 
+ 	runner := instruction.NewRunner(bprint.Name, d.Config.BestEffort, d.Config.DebugLoggingEnabled)
+ 	results := make([]result, len(bprint.Homeservers))
+@@ -435,6 +439,26 @@ func generateASRegistrationYaml(as b.ApplicationService) string {
+ 		"  aliases: []\\n"
+ }
+ 
++// joinNetwork connects the container that Complement runs in to the network, with the alias that homeservers use for
++// Complement, when COMPLEMENT_IN_DOCKER_NETWORK is on. The hostname of a container is its ID.
++func joinNetwork(docker *client.Client, networkName string, cfg *config.Complement) error {
++	if !cfg.InDockerNetwork {
++		return nil
++	}
++	self, err := os.Hostname()
++	if err != nil {
++		return fmt.Errorf("joinNetwork: %w", err)
++	}
++	_, err = docker.NetworkConnect(context.Background(), networkName, client.NetworkConnectOptions{
++		Container:      self,
++		EndpointConfig: &network.EndpointSettings{Aliases: []string{cfg.HostnameRunningComplement}},
++	})
++	if err != nil && !strings.Contains(err.Error(), "already exists") {
++		return fmt.Errorf("joinNetwork: connecting %s to %s: %w", self, networkName, err)
++	}
++	return nil
++}
++
+ // createNetworkIfNotExists creates a docker network and returns its name.
+ // Name is guaranteed not to be empty when err == nil
+ func createNetworkIfNotExists(docker *client.Client, pkgNamespace, blueprintName string) (networkName string, err error) {
+diff --git a/internal/docker/deployer.go b/internal/docker/deployer.go
+index 40a6a9a..b8b85ab 100644
+--- a/internal/docker/deployer.go
++++ b/internal/docker/deployer.go
+@@ -86,6 +86,9 @@ func (d *Deployer) CreateDirtyServer(hsName string) (*HomeserverDeployment, erro
+ 	if err != nil {
+ 		return nil, fmt.Errorf("CreateDirtyDeployment: %w", err)
+ 	}
++	if err = joinNetwork(d.Docker, networkName, d.config); err != nil {
++		return nil, fmt.Errorf("CreateDirtyDeployment: %w", err)
++	}
+ 	baseImageURI := d.config.BaseImageURI
+ 	// Use HS specific base image if defined
+ 	if uri, ok := d.config.BaseImageURIs[hsName]; ok {
+@@ -155,6 +158,9 @@ func (d *Deployer) Deploy(ctx context.Context, blueprintName string) (*Deploymen
+ 	if err != nil {
+ 		return nil, fmt.Errorf("Deploy: %w", err)
+ 	}
++	if err = joinNetwork(d.Docker, networkName, d.config); err != nil {
++		return nil, fmt.Errorf("Deploy: %w", err)
++	}
+ 
+ 	// deploy images in parallel
+ 	var mu sync.Mutex // protects mutable values like the counter and errors
+@@ -317,7 +323,7 @@ func (d *Deployer) StartServer(hsDep *HomeserverDeployment) error {
+ 	if err != nil {
+ 		return fmt.Errorf("failed to wait for ports on container %s: %s", hsDep.ContainerID, err)
+ 	}
+-	baseURL, fedBaseURL, err := getHostAccessibleHomeserverURLs(ctx, d.Docker, hsDep.ContainerID, d.config.HSPortBindingIP)
++	baseURL, fedBaseURL, err := getHostAccessibleHomeserverURLs(ctx, d.Docker, hsDep.ContainerID, d.config.HSPortBindingIP, d.config.InDockerNetwork, hsDep.Network)
+ 	if err != nil {
+ 		return fmt.Errorf("failed to get host accessible homeserver URL's from container %s: %s", hsDep.ContainerID, err)
+ 	}
+@@ -342,7 +348,7 @@ func deployImage(
+ 	var mounts []mount.Mount
+ 	var err error
+ 
+-	if runtime.GOOS == "linux" {
++	if runtime.GOOS == "linux" && !cfg.InDockerNetwork {
+ 		// Ensure that the homeservers under test can contact the host, so they can
+ 		// interact with a complement-controlled test server.
+ 		// Note: this feature of docker landed in Docker 20.10,
+@@ -490,7 +496,7 @@ func deployImage(
+ 	if err != nil {
+ 		return stubDeployment, fmt.Errorf("%s: failed to wait for ports on container %s: %w", contextStr, containerID, err)
+ 	}
+-	baseURL, fedBaseURL, err := getHostAccessibleHomeserverURLs(ctx, docker, containerID, cfg.HSPortBindingIP)
++	baseURL, fedBaseURL, err := getHostAccessibleHomeserverURLs(ctx, docker, containerID, cfg.HSPortBindingIP, cfg.InDockerNetwork, networkName)
+ 	if err != nil {
+ 		return stubDeployment, fmt.Errorf(
+ 			"%s: failed to get host accessible homeserver URL's from container %s: %s",
+@@ -573,11 +579,20 @@ func assertHostnameEqual(inputUrl string, expectedHostname string) error {
+ 
+ // getHostAccessibleHomeserverURLs returns URLs that are accessible from the host
+ // machine (outside the container) for the homeserver's client API and federation API.
+-func getHostAccessibleHomeserverURLs(ctx context.Context, docker *client.Client, containerID string, hsPortBindingIP string) (baseURL string, fedBaseURL string, err error) {
++func getHostAccessibleHomeserverURLs(ctx context.Context, docker *client.Client, containerID string, hsPortBindingIP string, inDockerNetwork bool, networkName string) (baseURL string, fedBaseURL string, err error) {
+ 	inspectResult, err := inspectContainer(ctx, docker, containerID)
+ 	if err != nil {
+ 		return "", "", fmt.Errorf("failed to inspect ports: %w", err)
+ 	}
++	if inDockerNetwork {
++		// Complement is in a container on the network of the homeserver: no port is published for it.
++		endpoint, ok := inspectResult.Container.NetworkSettings.Networks[networkName]
++		if !ok || !endpoint.IPAddress.IsValid() {
++			return "", "", fmt.Errorf("container %s has no address on network %s", containerID, networkName)
++		}
++		ip := endpoint.IPAddress.String()
++		return "http://" + ip + ":8008", "https://" + ip + ":8448", nil
++	}
+ 
+ 	baseURL, fedBaseURL, err = endpoints(inspectResult.Container.NetworkSettings.Ports, hsPortBindingIP, 8008, 8448)
+ 
