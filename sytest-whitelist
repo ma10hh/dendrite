@@ -794,3 +794,6 @@ Can reject invites over federation for rooms with version 11
 Can receive redactions from regular users over federation in room version 11
 Can upload self-signing keys
 uploading signed devices gets propagated over federation
+Fails to replace cross-signing keys with no auth
+HS will proxy request for 3PU mapping
+HS will proxy request for 3PL mapping
