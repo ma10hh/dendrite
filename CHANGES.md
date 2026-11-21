@@ -28,6 +28,7 @@
 
 
 ### Bug fixes
+ - Partial-state `send_join` answers (`omit_members`, experimental) include the memberships of up to five room heroes in the state, as MSC3706 asks, and no longer repeat state events in the auth chain.
  - On SQLite with cgo, wait up to 10 seconds for a locked database like the driver without cgo does (the default was 5): rooms created at the same time could fail with a 500 and `database is locked`.
  - **Security:** another server could crash Dendrite with an event whose room ID is `!:` or similar: the event library accepts it, and `RoomID()` and the check of the signatures then panic in the goroutine of the room. Such events are now refused when they arrive, and a panic while an event is processed fails that event instead of stopping the server.
  - Updating a registration token (`uses_allowed`, `expiry_time`) did nothing on SQLite, because SQLite numbered the parameters of the statement by order of appearance.

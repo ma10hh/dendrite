@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -32,6 +33,7 @@ import (
 )
 
 func TestSendJoinOmitMembers(t *testing.T) {
+	const heroes = 5 // maxHeroes of the package
 	alice := test.NewUser(t)
 	bob := test.NewUser(t, test.WithSigningServer("second.example", "ed25519:b", test.PrivateKeyA))
 	carol := test.NewUser(t, test.WithSigningServer(knockRemote, "ed25519:c", test.PrivateKeyB))
@@ -44,6 +46,15 @@ func TestSendJoinOmitMembers(t *testing.T) {
 		room.CreateAndInsert(t, u, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(u.ID))
 	}
 
+	// A room with more members than there are heroes.
+	big := test.NewRoom(t, alice, test.RoomVersion(gomatrixserverlib.RoomVersionV10), test.RoomPreset(test.PresetPublicChat))
+	var bigMembers []*test.User
+	for i := 0; i < 7; i++ {
+		u := test.NewUser(t, test.WithSigningServer("second.example", "ed25519:b", test.PrivateKeyA))
+		bigMembers = append(bigMembers, u)
+		big.CreateAndInsert(t, u, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(u.ID))
+	}
+
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
 		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
 		defer closeFn()
@@ -54,12 +65,13 @@ func TestSendJoinOmitMembers(t *testing.T) {
 		rsAPI.SetFederationAPI(nil, nil)
 		ctx := context.Background()
 		require.NoError(t, api.SendEvents(ctx, rsAPI, api.KindNew, room.Events(), "test", "test", "test", nil, false))
+		require.NoError(t, api.SendEvents(ctx, rsAPI, api.KindNew, big.Events(), "test", "test", "test", nil, false))
 
-		roomID, _ := spec.NewRoomID(room.ID)
 		daveID, _ := spec.NewUserID(dave.ID, true)
 
-		join := func(omit bool) fclient.RespSendJoin {
+		joinRoom := func(room *test.Room, omit bool) fclient.RespSendJoin {
 			t.Helper()
+			roomID, _ := spec.NewRoomID(room.ID)
 			path := "/make_join/" + room.ID + "/" + dave.ID
 			makeReq := fclient.NewFederationRequest("GET", knockRemote, cfg.Global.ServerName, path)
 			made := routing.MakeJoin(httptest.NewRequest(http.MethodGet, path, nil), &makeReq, &cfg.FederationAPI, rsAPI, *roomID, *daveID, []gomatrixserverlib.RoomVersion{gomatrixserverlib.RoomVersionV10})
@@ -75,6 +87,7 @@ func TestSendJoinOmitMembers(t *testing.T) {
 			require.Equal(t, http.StatusOK, res.Code, "%+v", res.JSON)
 			return res.JSON.(fclient.RespSendJoin)
 		}
+		join := func(omit bool) fclient.RespSendJoin { return joinRoom(room, omit) }
 		members := func(events []spec.RawJSON) (out []string) {
 			for _, raw := range events {
 				if gjson.GetBytes(raw, "type").String() == spec.MRoomMember {
@@ -95,12 +108,8 @@ func TestSendJoinOmitMembers(t *testing.T) {
 			assert.True(t, res.MembersOmitted)
 			assert.Equal(t, []string{string(knockRemote), "second.example", "test"}, res.ServersInRoom, "the servers to ask for the rest")
 			got := members(toRaw(res.StateEvents))
-			assert.ElementsMatch(t, []string{carol.ID}, got, "only the users of the joining server stay (dave joined after the state was read)")
-			assert.NotContains(t, got, alice.ID)
-			assert.NotContains(t, got, bob.ID)
-			// The creator is not in the state, but the power levels name its membership as an auth event.
-			assert.Contains(t, members(toRaw(res.AuthEvents)), alice.ID, "the auth chain of what stays is complete")
-			assert.NotContains(t, members(toRaw(res.AuthEvents)), bob.ID, "memberships nothing needs are left out")
+			assert.ElementsMatch(t, []string{alice.ID, bob.ID, carol.ID}, got, "a small room: everybody is a hero, and carol is of the joining server (dave joined after the state was read)")
+			assert.Empty(t, members(toRaw(res.AuthEvents)), "the heroes are in the state, so nothing is needed in the auth chain")
 			// The state that is not about members is whole.
 			var types []string
 			for _, raw := range res.StateEvents {
@@ -109,6 +118,32 @@ func TestSendJoinOmitMembers(t *testing.T) {
 			assert.Contains(t, types, spec.MRoomCreate)
 			assert.Contains(t, types, spec.MRoomPowerLevels)
 			assert.Contains(t, types, spec.MRoomJoinRules)
+		})
+
+		t.Run("a big room keeps the heroes and the users of the joining server", func(t *testing.T) {
+			res := joinRoom(big, true)
+			assert.True(t, res.MembersOmitted)
+			got := members(toRaw(res.StateEvents))
+			assert.Len(t, got, heroes, "the heroes, and no others (nobody of the joining server is in this room)")
+			assert.Contains(t, got, alice.ID, "the creator joined first")
+			for _, id := range got {
+				assert.NotEqual(t, dave.ID, id)
+			}
+			var inRoom []string
+			for _, u := range bigMembers {
+				inRoom = append(inRoom, u.ID)
+			}
+			var omitted int
+			for _, id := range inRoom {
+				if !slices.Contains(got, id) {
+					omitted++
+				}
+			}
+			assert.Equal(t, len(inRoom)-(heroes-1), omitted, "the other members are left out")
+			// What an event that stays names as its auth event goes to the auth chain, so that it can be checked.
+			for _, id := range members(toRaw(res.AuthEvents)) {
+				assert.NotContains(t, got, id)
+			}
 		})
 
 		t.Run("nothing is left out otherwise", func(t *testing.T) {
