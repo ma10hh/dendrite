@@ -129,7 +129,7 @@ func (r *Leaver) performLeaveRoomByID(
 	}
 
 	// A knock on a room this server is not in is withdrawn by leaving the room through the servers that are in it.
-	if outputs, handled, kerr := r.withdrawRemoteKnock(ctx, req, *roomID, *leaver); handled {
+	if outputs, handled, kerr := r.withdrawRemoteKnock(ctx, req, *roomID, *leaver); kerr != nil || handled {
 		return outputs, kerr
 	}
 
@@ -285,7 +285,10 @@ func (r *Leaver) withdrawRemoteKnock(
 	ctx context.Context, req *api.PerformLeaveRequest, roomID spec.RoomID, leaver spec.SenderID,
 ) (outputs []api.OutputEvent, handled bool, err error) {
 	info, err := r.DB.RoomInfo(ctx, req.RoomID)
-	if err != nil || info == nil || !info.IsStub() {
+	if err != nil {
+		return nil, false, err
+	}
+	if info == nil || !info.IsStub() {
 		return nil, false, nil
 	}
 	updater, err := r.DB.MembershipUpdater(ctx, req.RoomID, string(leaver), true, info.RoomVersion)
@@ -310,6 +313,11 @@ func (r *Leaver) withdrawRemoteKnock(
 	if updater, err = r.DB.MembershipUpdater(ctx, req.RoomID, string(leaver), true, info.RoomVersion); err != nil {
 		return nil, true, fmt.Errorf("ending the knock: %w", err)
 	}
+	// The other server may have answered the knock with an invite while it was asked: that is not ours to delete.
+	if !updater.IsKnock() {
+		_ = updater.Rollback()
+		return nil, false, nil
+	}
 	if err = updater.Delete(); err != nil {
 		_ = updater.Rollback()
 		return nil, true, fmt.Errorf("ending the knock: %w", err)
@@ -322,6 +330,8 @@ func (r *Leaver) withdrawRemoteKnock(
 		RetireKnockEvent: &api.OutputRetireKnockEvent{
 			RoomID:         req.RoomID,
 			TargetSenderID: leaver,
+			// A withdrawn knock ends with a leave, which the sync API writes for the clients.
+			Membership: spec.Leave,
 		},
 	}}, true, nil
 }
