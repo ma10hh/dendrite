@@ -6,6 +6,7 @@
 package routing
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -205,8 +206,12 @@ func (a *mediaAdmin) listUser(req *http.Request) util.JSONResponse {
 	}
 	media, total, err := a.db.ListUserMedia(req.Context(), vars["userId"], from, limit, q.Get("order_by"), backwards)
 	if err != nil {
+		if errors.Is(err, types.ErrUnknownOrder) {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("order_by is not something media can be ordered by")}
+		}
+		// Not the fault of the request, and nothing of the error is for the caller.
 		util.GetLogger(req.Context()).WithError(err).Error("ListUserMedia failed")
-		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam(err.Error())}
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 	}
 	type entry struct {
 		MediaID            string  `json:"media_id"`

@@ -179,6 +179,11 @@ func (r *uploadRequest) doUpload(
 		return resErr
 	}
 
+	// From the look-up by hash to the stored metadata no removal of a media may run: it would delete the file that this
+	// upload is about to refer to (media that share a file are deleted with the last of them).
+	mediaFileMu.Lock()
+	defer mediaFileMu.Unlock()
+
 	// Look up the media by the file hash. If we already have the file but under a
 	// different media ID then we won't upload the file again - instead we'll just
 	// add a new metadata entry that refers to the same file.
@@ -208,10 +213,11 @@ func (r *uploadRequest) doUpload(
 
 		// Then amend the upload metadata.
 		r.MediaMetadata = &types.MediaMetadata{
-			MediaID:           mediaID,
-			Origin:            r.MediaMetadata.Origin,
-			ContentType:       r.MediaMetadata.ContentType,
-			FileSizeBytes:     r.MediaMetadata.FileSizeBytes,
+			MediaID:     mediaID,
+			Origin:      r.MediaMetadata.Origin,
+			ContentType: r.MediaMetadata.ContentType,
+			// What was received, not what the request announced: the quota counts it, and a chunked request announces -1.
+			FileSizeBytes:     bytesWritten,
 			CreationTimestamp: r.MediaMetadata.CreationTimestamp,
 			UploadName:        r.MediaMetadata.UploadName,
 			Base64Hash:        hash,

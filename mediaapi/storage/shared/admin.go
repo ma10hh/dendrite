@@ -67,7 +67,7 @@ func (d *Database) ListUserMedia(
 ) ([]types.MediaMetadata, int, error) {
 	column, ok := mediaOrderColumns[orderBy]
 	if !ok {
-		return nil, 0, fmt.Errorf("unknown order %q", orderBy)
+		return nil, 0, fmt.Errorf("%w %q", types.ErrUnknownOrder, orderBy)
 	}
 	var total int
 	if err := d.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM mediaapi_media_repository WHERE user_id = $1", userID).Scan(&total); err != nil {

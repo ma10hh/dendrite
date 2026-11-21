@@ -7,11 +7,15 @@
 package types
 
 import (
+	"errors"
 	"sync"
 
 	"github.com/element-hq/dendrite/setup/config"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 )
+
+// ErrUnknownOrder is the error of a listing that is asked to be ordered by something that media do not have.
+var ErrUnknownOrder = errors.New("unknown order")
 
 // FileSizeBytes is a file size in bytes
 type FileSizeBytes int64

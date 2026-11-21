@@ -163,3 +163,27 @@ func TestUploadQuotaAndLastAccess(t *testing.T) {
 		assert.Greater(t, after.Int(), int64(0))
 	})
 }
+
+// A chunked upload of a file that is stored already is charged what it is, not what the request announced (-1).
+func TestDeduplicatedUploadIsChargedItsSize(t *testing.T) {
+	cfg, db, routers := retentionTestSetup(t, "dedup")
+	cfg.MediaAPI.MaxUserStorageBytes = 100
+	upload := func(chunked bool) gjson.Result {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPost, "/_matrix/media/v3/upload?filename=f.txt", bytes.NewReader([]byte("0123456789")))
+		if chunked {
+			req.ContentLength = -1
+		}
+		req.Header.Set("Content-Type", "text/plain")
+		req.Header.Set("Authorization", "Bearer user")
+		rec := httptest.NewRecorder()
+		routers.Media.ServeHTTP(rec, req)
+		require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+		return gjson.Parse(rec.Body.String())
+	}
+	upload(false)
+	upload(true)
+	used, err := db.UserMediaBytes(context.Background(), "@user:test")
+	require.NoError(t, err)
+	assert.Equal(t, int64(20), used, "both media count their ten bytes")
+}

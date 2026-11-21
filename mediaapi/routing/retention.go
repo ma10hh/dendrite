@@ -81,8 +81,14 @@ func touchMedia(ctx context.Context, db storage.Database, id types.MediaID, orig
 	}
 }
 
+// mediaFileMu keeps the removal of a media from running between the look-up of a file by its hash and the metadata of an
+// upload that refers to the same file.
+var mediaFileMu sync.Mutex
+
 // removeMedia deletes the media, and its file and thumbnails if no other media uses them.
 func removeMedia(ctx context.Context, cfg *config.MediaAPI, db storage.Database, id types.MediaID, origin spec.ServerName) (bool, error) {
+	mediaFileMu.Lock()
+	defer mediaFileMu.Unlock()
 	meta, inUse, err := db.DeleteMedia(ctx, id, origin)
 	if err != nil || meta == nil {
 		return false, err

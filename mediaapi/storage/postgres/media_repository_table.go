@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS mediaapi_media_repository (
     user_id TEXT NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS mediaapi_media_repository_index ON mediaapi_media_repository (media_id, media_origin);
+-- The quota, the list and the quarantine of a user, and the check whether a file is used by other media.
+CREATE INDEX IF NOT EXISTS mediaapi_media_repository_user_idx ON mediaapi_media_repository (user_id);
+CREATE INDEX IF NOT EXISTS mediaapi_media_repository_hash_idx ON mediaapi_media_repository (base64hash, media_origin);
 `
 
 const insertMediaSQL = `
