@@ -143,6 +143,11 @@ func TestMASEndpoints(t *testing.T) {
 		if !gjson.GetBytes(rec.Body.Bytes(), "is_deactivated").Bool() {
 			t.Errorf("alice should be deactivated: %s", rec.Body)
 		}
+		// The addresses of a deleted user are free for the next one: MAS gives them to another user.
+		wantCode(mas(http.MethodPost, "provision_user", map[string]any{
+			"localpart": "carol", "set_emails": []string{"alice@example.com"},
+		}), http.StatusCreated, "an address of a deleted user goes to another user")
+		wantCode(mas(http.MethodPost, "delete_user", map[string]any{"localpart": "carol", "erase": false}), http.StatusOK, "delete carol")
 		wantCode(mas(http.MethodPost, "reactivate_user", map[string]any{"localpart": "alice"}), http.StatusOK, "reactivate user")
 		rec = mas(http.MethodGet, "query_user?localpart=alice", nil)
 		if gjson.GetBytes(rec.Body.Bytes(), "is_deactivated").Bool() {

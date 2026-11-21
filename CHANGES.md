@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Upgrade notes
+ - Helm chart: `dendrite_config.global.profiling` moved to `profiling` (it was read by the chart only, and the strict configuration check refused it in `dendrite.yaml`), and `dendrite_config.global.metrics.basic_auth.user` is now `username` as in the configuration (the old key was ignored, so the metrics user was never set from the chart). Move your overrides.
  - Dendrite now refuses a configuration with duplicate keys or keys it does not know, and names them with their line numbers. Before, the last of two blocks with the same key silently won and misspelled or removed options (for example `kafka`, `server_key_api` or `pusher_database` from older versions) were ignored. Remove them, or run `generate-config -normalise dendrite.yaml` to write the file out again in the current form: it still reads old configurations. Application service registration files are not affected.
 
 ### Features
@@ -28,6 +29,11 @@
 
 
 ### Bug fixes
+ - `POST /delete_devices` with an empty list of devices deletes nothing (it deleted all the devices of the user for an application service, which does not do user-interactive auth); a request without the list is a 400.
+ - An application service that sends a request with its token and no user keeps the device it registered for itself,, as upstream does (an earlier change of this fork gave it the placeholder device `AS_Device`, which would have moved bridge bots with encryption to another device).
+ - With the Matrix Authentication Service: `delete_user` releases the email addresses of the user, so MAS can give them to another user (`provision_user` failed with a 500 for ever); and `device_id` of the introspection response is only used with MAS, not with another provider.
+ - Creating an account that fails in the database is an error for the caller, not "the account exists" (`provision_user` answered 200 for accounts that were not made).
+ - Fixed the sample configuration (the `introspection_endpoint` example was under `rendezvous`), and the SQLite upgrade test uses Go 1.25 like the module.
  - Partial-state `send_join` answers (`omit_members`, experimental) include the memberships of up to five room heroes in the state, as MSC3706 asks, and no longer repeat state events in the auth chain.
  - On SQLite with cgo, wait up to 10 seconds for a locked database like the driver without cgo does (the default was 5): rooms created at the same time could fail with a 500 and `database is locked`.
  - **Security:** another server could crash Dendrite with an event whose room ID is `!:` or similar: the event library accepts it, and `RoomID()` and the check of the signatures then panic in the goroutine of the room. Such events are now refused wherever one is read from another server (transactions, `/event`, `/get_missing_events`, invite answers, the state of a room that is joined with partial state), and a panic while an event is processed fails that event instead of stopping the server; the background tasks that handle such data recover from panics too.

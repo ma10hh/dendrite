@@ -343,7 +343,9 @@ func (p *Provider) introspectRemote(ctx context.Context, accessToken, key string
 	token.Username = ir.Username
 	// Only MAS is known to grant this scope to admins alone. Another provider may hand out any scope a client asks for.
 	token.IsAdmin = token.IsAdmin && p.cfg.MASMode()
-	if ir.DeviceID != "" {
+	// Only MAS is asked for the device ID (X-MAS-Supports-Device-Id); another provider may use the member for
+	// something else, and its tokens keep to the rule of exactly one device scope.
+	if ir.DeviceID != "" && p.cfg.MASMode() {
 		token.DeviceID = ir.DeviceID
 		if len(ir.DeviceID) > maxDeviceIDLength {
 			token.DeviceID = ""

@@ -364,3 +364,30 @@ func TestIntrospectionMetrics(t *testing.T) {
 		}
 	}
 }
+
+// Only MAS is asked for the device ID. Another provider may use the member for something else, and its tokens keep
+// to the rule that they need exactly one device scope.
+func TestDeviceIDMemberIsOnlyForMAS(t *testing.T) {
+	f := newFakeProvider(t, wellKnownOIDC)
+	f.response = `{"active": true, "username": "alice", "device_id": "SHARED", "scope": "urn:matrix:client:api:* urn:matrix:client:device:A urn:matrix:client:device:B"}`
+	ctx := context.Background()
+
+	generic, err := New(f.config()).Introspect(ctx, "tok")
+	if err != nil || generic == nil {
+		t.Fatalf("generic provider: %v, %v", generic, err)
+	}
+	if generic.DeviceID != "" {
+		t.Errorf("a generic provider's device_id was used for the device: %q", generic.DeviceID)
+	}
+
+	cfg := f.config()
+	cfg.SharedSecret = "s3cret"
+	cfg.ClientID, cfg.ClientSecret = "", ""
+	mas, err := New(cfg).Introspect(ctx, "tok2")
+	if err != nil || mas == nil {
+		t.Fatalf("MAS: %v, %v", mas, err)
+	}
+	if mas.DeviceID != "SHARED" {
+		t.Errorf("MAS device ID = %q, want the one of the introspection response", mas.DeviceID)
+	}
+}

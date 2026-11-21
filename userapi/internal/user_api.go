@@ -226,6 +226,10 @@ func (a *UserInternalAPI) PerformAccountCreation(ctx context.Context, req *api.P
 				}
 			}
 		}
+		if !errors.Is(err, sqlutil.ErrUserExists) {
+			// Not a conflict: the account was not created, which the callers must hear of.
+			return fmt.Errorf("creating the account: %w", err)
+		}
 		// account already exists
 		res.AccountCreated = false
 		res.Account = &api.Account{
@@ -560,18 +564,22 @@ func (a *UserInternalAPI) QueryAccountData(ctx context.Context, req *api.QueryAc
 }
 
 func (a *UserInternalAPI) QueryAccessToken(ctx context.Context, req *api.QueryAccessTokenRequest, res *api.QueryAccessTokenResponse) error {
-	// An appservice that asserts no user acts as its sender_localpart user.
-	appServiceDevice, err := a.queryAppServiceToken(ctx, req.AccessToken, req.AppServiceUserID, req.AppServiceDeviceID)
-	if err != nil || appServiceDevice != nil {
-		var unknownDevice *api.ErrorUnknownDevice
-		if errors.As(err, &unknownDevice) {
-			res.UnknownDevice = true
-		} else if err != nil {
-			res.Err = err.Error()
-		}
-		res.Device = appServiceDevice
+	// An appservice that asserts no user acts as its sender_localpart user. Without delegated authentication such a
+	// request keeps the device that the appservice has registered for itself (named after its sender_localpart): bridge
+	// bots have their keys and sessions on it. With delegated authentication there is no such device to find.
+	if req.AppServiceUserID != "" || req.AppServiceDeviceID != "" || a.DelegatedAuth != nil {
+		appServiceDevice, err := a.queryAppServiceToken(ctx, req.AccessToken, req.AppServiceUserID, req.AppServiceDeviceID)
+		if err != nil || appServiceDevice != nil {
+			var unknownDevice *api.ErrorUnknownDevice
+			if errors.As(err, &unknownDevice) {
+				res.UnknownDevice = true
+			} else if err != nil {
+				res.Err = err.Error()
+			}
+			res.Device = appServiceDevice
 
-		return nil
+			return nil
+		}
 	}
 	// If the provided token wasn't an as_token (both err and appServiceDevice are nil), continue with normal auth.
 	if a.DelegatedAuth != nil {

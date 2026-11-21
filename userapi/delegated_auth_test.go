@@ -226,9 +226,14 @@ func TestQueryAccessTokenAppserviceDevice(t *testing.T) {
 		if res := query("@ghost:example.com", ""); res.Device == nil || res.Device.ID != "AS_Device" || res.Device.UserID != "@ghost:example.com" {
 			t.Errorf("got %+v err %q", res.Device, res.Err)
 		}
-		// The sender is a full user ID.
-		if res := query("", ""); res.Device == nil || res.Device.UserID != "@bridgebot:example.com" || res.Device.AppserviceID != "bridge" {
-			t.Errorf("got %+v", res.Device)
+		// Without a user the appservice keeps the device it registered for itself, named after its sender_localpart, as
+		// before: bridge bots have their keys and sessions on it. (The appservice makes it at startup.)
+		botID := "bridgebot"
+		if _, err := accountDB.CreateDevice(ctx, "bridgebot", serverName, &botID, "as_token", nil, "", ""); err != nil {
+			t.Fatal(err)
+		}
+		if res := query("", ""); res.Device == nil || res.Device.ID != "bridgebot" || res.Device.UserID != "@bridgebot:example.com" {
+			t.Errorf("sender without a user: got %+v err %q, want the registered device", res.Device, res.Err)
 		}
 
 		// A device that does not exist cannot be asserted.

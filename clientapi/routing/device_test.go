@@ -100,3 +100,33 @@ func TestAppserviceDeletesDevicesWithoutUIA(t *testing.T) {
 		t.Errorf("unexpected deletion %+v", api.deleted)
 	}
 }
+
+// The user API reads an empty list of devices as "all of them", so an appservice that sends {} (a bridge whose list of
+// stale devices came out empty) must not reach it: the endpoint deletes what the request names, and nothing else.
+func TestDeleteDevicesEmptyListDeletesNothing(t *testing.T) {
+	asDevice := &userapi.Device{UserID: "@ghost:example.com", ID: "AS_Device", AppserviceID: "bridge"}
+	for name, tc := range map[string]struct {
+		body     string
+		wantCode int
+		wantCall bool
+	}{
+		"empty list":    {`{"devices": []}`, http.StatusOK, false},
+		"missing field": {`{}`, http.StatusBadRequest, false},
+		"two devices":   {`{"devices": ["A", "B"]}`, http.StatusOK, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			userAPI := &deviceAPI{}
+			req := httptest.NewRequest(http.MethodPost, "/_matrix/client/v3/delete_devices", strings.NewReader(tc.body))
+			res := DeleteDevices(req, nil, userAPI, asDevice)
+			if res.Code != tc.wantCode {
+				t.Errorf("code %d, want %d (%+v)", res.Code, tc.wantCode, res.JSON)
+			}
+			if (len(userAPI.deleted) > 0) != tc.wantCall {
+				t.Errorf("deletions: %+v, want a call: %v", userAPI.deleted, tc.wantCall)
+			}
+			if tc.wantCall && len(userAPI.deleted[0].DeviceIDs) != 2 {
+				t.Errorf("deleted %v", userAPI.deleted[0].DeviceIDs)
+			}
+		})
+	}
+}

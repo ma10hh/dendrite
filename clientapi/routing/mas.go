@@ -70,7 +70,6 @@ type masAPI struct {
 	userAPI userapi.ClientUserAPI
 	rsAPI   roomserverAPI.ClientRoomserverAPI
 	// Serialises device creation, which replaces a device that already exists.
-	deviceMu sync.Mutex
 }
 
 // setupMASRoutes registers the endpoints under /_synapse/mas/. All of them need the shared secret.
@@ -381,6 +380,11 @@ func (m *masAPI) deleteUser(req *http.Request) util.JSONResponse {
 	}, &res); err != nil {
 		return internalError(req, "PerformAccountDeactivation", err)
 	}
+	// The addresses of a deleted user are free again, as with Synapse: MAS may give them to another user, whose
+	// provision_user would fail for ever if they stayed bound here.
+	if resErr := m.syncEmails(req, user.localpart, nil); resErr != nil {
+		return *resErr
+	}
 	return emptyOK()
 }
 
@@ -468,8 +472,8 @@ func (m *masAPI) upsertDevice(req *http.Request) util.JSONResponse {
 
 // ensureDevice creates the device, or updates its display name if it exists. It reports whether it was created.
 func (m *masAPI) ensureDevice(req *http.Request, user *masUser, deviceID string, displayName *string) (bool, error) {
-	m.deviceMu.Lock()
-	defer m.deviceMu.Unlock()
+	deviceCreationMu.Lock()
+	defer deviceCreationMu.Unlock()
 	ctx := req.Context()
 
 	var existing userapi.QueryDevicesResponse
@@ -576,8 +580,8 @@ func (m *masAPI) syncDevices(req *http.Request) util.JSONResponse {
 		target[id] = true
 	}
 
-	m.deviceMu.Lock()
-	defer m.deviceMu.Unlock()
+	deviceCreationMu.Lock()
+	defer deviceCreationMu.Unlock()
 	var existing userapi.QueryDevicesResponse
 	if err := m.userAPI.QueryDevices(req.Context(), &userapi.QueryDevicesRequest{UserID: user.userID}, &existing); err != nil {
 		return internalError(req, "QueryDevices", err)

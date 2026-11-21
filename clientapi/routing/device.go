@@ -118,9 +118,9 @@ func GetDevicesByLocalpart(
 	}
 }
 
-// UpdateDeviceByID handles PUT on /devices/{deviceID}
-// appserviceDeviceMu keeps two creations of the same device from replacing each other.
-var appserviceDeviceMu sync.Mutex
+// deviceCreationMu keeps two creations of the same device from replacing each other: an appservice and MAS can both
+// create the device of a user, and the second creation would revoke the token of the first.
+var deviceCreationMu sync.Mutex
 
 // createAppserviceDevice creates a device for the user an appservice acts as (MSC4190).
 func createAppserviceDevice(
@@ -130,8 +130,8 @@ func createAppserviceDevice(
 	if err != nil {
 		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("The appservice does not act as a user")}
 	}
-	appserviceDeviceMu.Lock()
-	defer appserviceDeviceMu.Unlock()
+	deviceCreationMu.Lock()
+	defer deviceCreationMu.Unlock()
 	var existing api.QueryDevicesResponse
 	if err = userAPI.QueryDevices(req.Context(), &api.QueryDevicesRequest{UserID: device.UserID}, &existing); err != nil {
 		util.GetLogger(req.Context()).WithError(err).Error("QueryDevices failed")
@@ -161,6 +161,7 @@ func createAppserviceDevice(
 	return util.JSONResponse{Code: http.StatusCreated, JSON: struct{}{}}
 }
 
+// UpdateDeviceByID handles PUT on /devices/{deviceID}
 func UpdateDeviceByID(
 	req *http.Request, userAPI api.ClientUserAPI, device *api.Device,
 	deviceID string,
@@ -331,6 +332,15 @@ func DeleteDevices(
 			Code: http.StatusInternalServerError,
 			JSON: spec.InternalServerError{},
 		}
+	}
+
+	// An empty list deletes nothing. The user API reads an empty list as "all the devices", which is for the other
+	// callers, and an appservice that sends {} must not log its user out everywhere.
+	if payload.Devices == nil {
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.MissingParam("devices must be a list of device IDs")}
+	}
+	if len(payload.Devices) == 0 {
+		return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}}
 	}
 
 	var res api.PerformDeviceDeletionResponse
