@@ -63,10 +63,10 @@ spec:
           - name: http
             containerPort: 8008
             protocol: TCP
-        {{- if $.Values.dendrite_config.global.profiling.enabled }}
+        {{- if $.Values.profiling.enabled }}
         env:
           - name: PPROFLISTEN
-            value: "localhost:{{- $.Values.dendrite_config.global.profiling.port -}}"
+            value: "localhost:{{- $.Values.profiling.port -}}"
         {{- end }}
         resources:
         {{- toYaml $.Values.resources | nindent 10 }}

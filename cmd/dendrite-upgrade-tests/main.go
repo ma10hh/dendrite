@@ -103,7 +103,7 @@ ENV BINARY=dendrite
 EXPOSE 8008 8448
 CMD /build/run_dendrite.sh`
 
-const DockerfileSQLite = `FROM golang:1.24-bookworm as build
+const DockerfileSQLite = `FROM golang:1.25-bookworm as build
 RUN apt-get update && apt-get install -y postgresql
 WORKDIR /build
 ARG BINARY

@@ -112,6 +112,14 @@ tolerations: {}
 # -- Affinity configuration
 affinity: {}
 
+profiling:
+  # -- Enable pprof. You will need to manually create a port forwarding to the deployment to access PPROF,
+  # as it will only listen on localhost and the defined port.
+  # e.g. `kubectl port-forward deployments/dendrite 65432:65432`
+  enabled: false
+  # -- pprof port, if enabled
+  port: 65432
+
 dendrite_config:
   version: 2
   global:
@@ -228,7 +236,7 @@ dendrite_config:
       # HTTP basic authentication to protect access to monitoring.
       basic_auth:
         # -- HTTP basic authentication username
-        user: "metrics"
+        username: "metrics"
         # -- HTTP basic authentication password
         password: metrics
 
@@ -239,14 +247,6 @@ dendrite_config:
       cache_size: 256
       # -- Duration for how long DNS cache items should be considered valid ([see time.ParseDuration](https://pkg.go.dev/time#ParseDuration) for more)
       cache_lifetime: "10m"
-
-    profiling:
-      # -- Enable pprof. You will need to manually create a port forwarding to the deployment to access PPROF,
-      # as it will only listen on localhost and the defined port.
-      # e.g. `kubectl port-forward deployments/dendrite 65432:65432`
-      enabled: false
-      # -- pprof port, if enabled
-      port: 65432
 
   # -- Configuration for experimental MSC's. (Valid values are: msc2836)
   mscs:

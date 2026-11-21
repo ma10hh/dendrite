@@ -98,13 +98,13 @@ Create a folder `appservices` and place your configurations in there.  The confi
 | dendrite_config.global.server_notices.avatar_url | string | `""` | The avatar URL (as a mxc:// URL) name for the user sending server notices. |
 | dendrite_config.global.server_notices.room_name | string | `"Server Alerts"` |  |
 | dendrite_config.global.metrics.enabled | bool | `false` | Whether or not Prometheus metrics are enabled. |
-| dendrite_config.global.metrics.basic_auth.user | string | `"metrics"` | HTTP basic authentication username |
+| dendrite_config.global.metrics.basic_auth.username | string | `"metrics"` | HTTP basic authentication username |
 | dendrite_config.global.metrics.basic_auth.password | string | `"metrics"` | HTTP basic authentication password |
 | dendrite_config.global.dns_cache.enabled | bool | `false` | Whether or not the DNS cache is enabled. |
 | dendrite_config.global.dns_cache.cache_size | int | `256` | Maximum number of entries to hold in the DNS cache |
 | dendrite_config.global.dns_cache.cache_lifetime | string | `"10m"` | Duration for how long DNS cache items should be considered valid ([see time.ParseDuration](https://pkg.go.dev/time#ParseDuration) for more) |
-| dendrite_config.global.profiling.enabled | bool | `false` | Enable pprof. You will need to manually create a port forwarding to the deployment to access PPROF, as it will only listen on localhost and the defined port. e.g. `kubectl port-forward deployments/dendrite 65432:65432` |
-| dendrite_config.global.profiling.port | int | `65432` | pprof port, if enabled |
+| profiling.enabled | bool | `false` | Enable pprof. You will need to manually create a port forwarding to the deployment to access PPROF, as it will only listen on localhost and the defined port. e.g. `kubectl port-forward deployments/dendrite 65432:65432` |
+| profiling.port | int | `65432` | pprof port, if enabled |
 | dendrite_config.mscs | object | `{"mscs":[]}` | Configuration for experimental MSC's. (Valid values are: msc2836) |
 | dendrite_config.app_service_api.disable_tls_validation | bool | `false` | Disable the validation of TLS certificates of appservices. This is not recommended in production since it may allow appservice traffic to be sent to an insecure endpoint. |
 | dendrite_config.app_service_api.config_files | list | `[]` | Appservice config files to load on startup. (**NOTE**: This is overriden by Helm, if a folder `./appservices/` exists) |

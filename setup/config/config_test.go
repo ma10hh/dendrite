@@ -393,3 +393,26 @@ func TestSampleConfigLoadsStrictly(t *testing.T) {
 		t.Errorf("dendrite-sample.yaml does not load strictly: %v", err)
 	}
 }
+
+// The default values of the Helm chart are written to dendrite.yaml, so they must load strictly too: a key that the
+// configuration does not know makes every deployment with the defaults refuse to start.
+func TestHelmValuesLoadStrictly(t *testing.T) {
+	data, err := os.ReadFile("../../helm/dendrite/values.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var values struct {
+		DendriteConfig map[string]any `yaml:"dendrite_config"`
+	}
+	if err = yaml.Unmarshal(data, &values); err != nil {
+		t.Fatal(err)
+	}
+	conf, err := yaml.Marshal(values.DendriteConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var c Dendrite
+	if err := unmarshalConfig(conf, &c, true); err != nil {
+		t.Errorf("dendrite_config of helm/dendrite/values.yaml does not load strictly: %v", err)
+	}
+}
