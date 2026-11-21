@@ -17,6 +17,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
 
+	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/storage"
 	"github.com/element-hq/dendrite/roomserver/types"
@@ -77,6 +78,7 @@ func (r *PartialStateResyncer) Run(ctx context.Context) {
 // ResyncAll goes through the rooms that have partial state once, the ones joined first first. A room that failed is
 // tried again later, after longer each time.
 func (r *PartialStateResyncer) ResyncAll(ctx context.Context) {
+	defer eventutil.LogPanic("the resync of rooms with partial state")
 	rooms, err := r.DB.PartialStateRooms(ctx)
 	if err != nil {
 		logrus.WithError(err).Error("failed to list the rooms with partial state")
@@ -163,7 +165,7 @@ func (r *PartialStateResyncer) fetchMembers(
 	var inputs []api.InputRoomEvent
 	var memberIDs []string
 	for _, ev := range resp.GetStateEvents().UntrustedEvents(info.RoomVersion) {
-		if ev.Type() != spec.MRoomMember || ev.StateKey() == nil || ev.RoomID().String() != join.RoomID().String() {
+		if eventutil.CheckUntrustedEvent(ev) != nil || ev.Type() != spec.MRoomMember || ev.StateKey() == nil || ev.RoomID().String() != join.RoomID().String() {
 			continue
 		}
 		if verr := gomatrixserverlib.VerifyEventSignatures(ctx, ev, in.KeyRing, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {

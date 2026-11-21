@@ -18,6 +18,7 @@ import (
 	"github.com/element-hq/dendrite/federationapi/api"
 	"github.com/element-hq/dendrite/federationapi/consumers"
 	"github.com/element-hq/dendrite/federationapi/statistics"
+	"github.com/element-hq/dendrite/internal/eventutil"
 	roomserverAPI "github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/types"
 	"github.com/element-hq/dendrite/roomserver/version"
@@ -610,6 +611,9 @@ func (r *FederationInternalAPI) SendInvite(
 	if err != nil {
 		return nil, fmt.Errorf("r.federation.SendInviteV2 failed to decode event response: %w", err)
 	}
+	if err = eventutil.CheckUntrustedEvent(inviteEvent); err != nil {
+		return nil, fmt.Errorf("r.federation.SendInviteV2: %w", err)
+	}
 	return inviteEvent, nil
 }
 
@@ -661,6 +665,9 @@ func (r *FederationInternalAPI) SendInviteV3(
 	inviteEvent, err := verImpl.NewEventFromUntrustedJSON(inviteRes.Event)
 	if err != nil {
 		return nil, fmt.Errorf("r.federation.SendInviteV3 failed to decode event response: %w", err)
+	}
+	if err = eventutil.CheckUntrustedEvent(inviteEvent); err != nil {
+		return nil, fmt.Errorf("r.federation.SendInviteV3: %w", err)
 	}
 	return inviteEvent, nil
 }
@@ -789,6 +796,9 @@ func federatedEventProvider(
 				ev, everr := verImpl.NewEventFromUntrustedJSON(pdu)
 				if everr != nil {
 					return nil, fmt.Errorf("missingAuth gomatrixserverlib.NewEventFromUntrustedJSON: %w", everr)
+				}
+				if everr = eventutil.CheckUntrustedEvent(ev); everr != nil {
+					return nil, fmt.Errorf("missingAuth: %w", everr)
 				}
 
 				// Check the signatures of the event.

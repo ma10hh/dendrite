@@ -119,6 +119,8 @@ func TestJoinWithPartialState(t *testing.T) {
 type fakeStateFederation struct {
 	fsapi.RoomserverFederationAPI
 	state []gomatrixserverlib.PDU
+	// bad is a member event with a room ID that the event library accepts and then panics on.
+	bad   []byte
 	asked atomic.Int32
 }
 
@@ -128,7 +130,11 @@ func (f *fakeStateFederation) QueryJoinedHostServerNamesInRoom(context.Context, 
 
 func (f *fakeStateFederation) LookupState(_ context.Context, _, _ spec.ServerName, _, _ string, _ gomatrixserverlib.RoomVersion) (gomatrixserverlib.StateResponse, error) {
 	f.asked.Add(1)
-	return &fclient.RespState{StateEvents: gomatrixserverlib.NewEventJSONsFromEvents(f.state)}, nil
+	events := gomatrixserverlib.NewEventJSONsFromEvents(f.state)
+	if f.bad != nil {
+		events = append(events, f.bad)
+	}
+	return &fclient.RespState{StateEvents: events}, nil
 }
 
 // The background fetch gives the room the memberships that were left out and removes the record.
@@ -157,7 +163,7 @@ func TestPartialStateResync(t *testing.T) {
 				partial = append(partial, ev.PDU)
 			}
 		}
-		fed := &fakeStateFederation{state: full}
+		fed := &fakeStateFederation{state: full, bad: []byte(`{"type":"m.room.member","state_key":"@x:remote.example","sender":"@x:remote.example","room_id":"!:","origin_server_ts":1,"depth":1,"content":{"membership":"join"},"auth_events":[],"prev_events":[],"hashes":{"sha256":"x"},"signatures":{}}`)}
 		rsAPI.SetFederationAPI(fed, nil)
 		internalAPI := rsAPI.(*internal.RoomserverInternalAPI)
 		internalAPI.Inputer.KeyRing = &test.NopJSONVerifier{}

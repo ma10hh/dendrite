@@ -7,9 +7,11 @@ package eventutil
 
 import (
 	"fmt"
+	"runtime/debug"
 
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
+	"github.com/sirupsen/logrus"
 	"github.com/tidwall/gjson"
 )
 
@@ -30,4 +32,12 @@ func CheckUntrustedEvent(event gomatrixserverlib.PDU) error {
 		return fmt.Errorf("the room ID %q is invalid: %w", roomID.String(), err)
 	}
 	return nil
+}
+
+// LogPanic is deferred at the top of a goroutine that handles data from other servers: a panic there would stop the
+// whole process, so it is logged with its stack, and the goroutine ends. It must be deferred directly.
+func LogPanic(what string) {
+	if p := recover(); p != nil {
+		logrus.WithField("stack", string(debug.Stack())).Errorf("Recovered from a panic in %s: %v", what, p)
+	}
 }

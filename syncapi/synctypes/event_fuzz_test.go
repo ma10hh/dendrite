@@ -1,6 +1,7 @@
 package synctypes_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -9,6 +10,7 @@ import (
 
 	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/syncapi/synctypes"
+	"github.com/element-hq/dendrite/test"
 )
 
 // FuzzUntrustedEvent feeds what a remote server could send as an event through what this server does with one it
@@ -48,6 +50,9 @@ func FuzzUntrustedEvent(f *testing.F) {
 			_ = ev.OriginServerTS()
 			_ = ev.StateKey()
 			_ = ev.SenderID()
+			_ = ev.RoomID()
+			// The check of the signatures calls RoomID() too, and is what the server does with the event next.
+			_ = gomatrixserverlib.VerifyEventSignatures(context.Background(), ev, &test.NopJSONVerifier{}, userID)
 			if headered, err := ev.ToHeaderedJSON(); err == nil {
 				back, err := gomatrixserverlib.NewEventFromHeaderedJSON(headered, false)
 				if err != nil {

@@ -2,6 +2,7 @@ package slidingsync
 
 import (
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -48,8 +49,17 @@ func FuzzParsePos(f *testing.F) {
 	f.Add("a/-1")
 	f.Add("a/99999999999999999999")
 	f.Fuzz(func(t *testing.T, pos string) {
-		if session, seq, err := ParsePos(pos); err == nil && (session == "" || seq != seq) {
-			t.Fatalf("ParsePos(%q) = %q, %d", pos, session, seq)
+		session, seq, err := ParsePos(pos)
+		if err != nil {
+			return
+		}
+		if session == "" {
+			t.Fatalf("ParsePos(%q) has no session", pos)
+		}
+		// What it parsed is what a position is made of: formatting it and parsing it again gives the same.
+		again, seqAgain, err := ParsePos(fmt.Sprintf("%s/%d", session, seq))
+		if err != nil || again != session || seqAgain != seq {
+			t.Fatalf("ParsePos(%q) = %q, %d, which does not survive a round trip (%q, %d, %v)", pos, session, seq, again, seqAgain, err)
 		}
 	})
 }

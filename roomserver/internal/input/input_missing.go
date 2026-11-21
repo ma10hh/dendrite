@@ -605,6 +605,9 @@ func (t *missingStateReq) getMissingEvents(ctx context.Context, e gomatrixserver
 	// will be added and duplicates will be removed.
 	missingEvents := make([]gomatrixserverlib.PDU, 0, len(missingResp.Events))
 	for _, ev := range missingResp.Events.UntrustedEvents(roomVersion) {
+		if eventutil.CheckUntrustedEvent(ev) != nil {
+			continue
+		}
 		if err = gomatrixserverlib.VerifyEventSignatures(ctx, ev, t.keys, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 			return t.inputer.Queryer.QueryUserIDForSender(ctx, roomID, senderID)
 		}); err != nil {
@@ -838,6 +841,7 @@ func (t *missingStateReq) lookupMissingStateViaStateIDs(ctx context.Context, roo
 		// Create the worker.
 		worker := func(ch <-chan string) {
 			defer fetchgroup.Done()
+			defer eventutil.LogPanic("the fetching of missing events")
 			for missingEventID := range ch {
 				fetch(missingEventID)
 			}
