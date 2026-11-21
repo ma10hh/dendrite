@@ -15,6 +15,7 @@ import (
 
 	fedapi "github.com/element-hq/dendrite/federationapi/api"
 	"github.com/element-hq/dendrite/internal"
+	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/state"
 	"github.com/element-hq/dendrite/roomserver/storage"
@@ -950,6 +951,10 @@ serverLoop:
 	if !found {
 		t.log.WithField("missing_event_id", missingEventID).Warnf("Failed to get missing /event for event ID from %d server(s)", len(t.servers))
 		return nil, fmt.Errorf("wasn't able to find event via %d server(s)", len(t.servers))
+	}
+	if err := eventutil.CheckUntrustedEvent(event); err != nil {
+		t.log.WithError(err).WithField("missing_event_id", missingEventID).Warn("Refusing an event returned from /event")
+		return nil, fmt.Errorf("the event %s is malformed: %w", missingEventID, err)
 	}
 	if err := gomatrixserverlib.VerifyEventSignatures(ctx, event, t.keys, func(roomID spec.RoomID, senderID spec.SenderID) (*spec.UserID, error) {
 		return t.inputer.Queryer.QueryUserIDForSender(ctx, roomID, senderID)

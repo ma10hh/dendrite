@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -365,10 +366,11 @@ func (w *worker) _next() {
 	// it was a synchronous request.
 	var errString string
 	wasRejected := false
-	if err = w.r.processRoomEvent(
+	if err = w.r.processRoomEventRecovering(
 		w.r.ProcessContext.Context(),
 		spec.ServerName(msg.Header.Get("virtual_host")),
 		&inputRoomEvent,
+		w.sentryHub,
 	); err != nil {
 		switch err.(type) {
 		case types.RejectedError:
@@ -419,6 +421,25 @@ func (w *worker) _next() {
 			}).Warn("Roomserver failed to respond for sync event")
 		}
 	}
+}
+
+// processRoomEventRecovering processes the event and turns a panic into an error. An event from another server that
+// the libraries cannot handle must fail that event, not stop the server: the worker of a room runs in its own
+// goroutine, where nothing else would catch it.
+func (r *Inputer) processRoomEventRecovering(
+	ctx context.Context, virtualHost spec.ServerName, input *api.InputRoomEvent, hub *sentry.Hub,
+) (err error) {
+	defer func() {
+		if p := recover(); p != nil {
+			err = fmt.Errorf("panic while processing the event: %v", p)
+			logrus.WithFields(logrus.Fields{
+				"event_id": input.Event.EventID(),
+				"stack":    string(debug.Stack()),
+			}).WithError(err).Error("Recovered from a panic in the roomserver")
+			hub.CaptureException(err)
+		}
+	}()
+	return r.processRoomEvent(ctx, virtualHost, input)
 }
 
 // queueInputRoomEvents queues events into the roomserver input

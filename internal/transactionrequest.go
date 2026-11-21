@@ -14,6 +14,7 @@ import (
 
 	"github.com/element-hq/dendrite/federationapi/producers"
 	"github.com/element-hq/dendrite/federationapi/types"
+	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/roomserver/api"
 	rstypes "github.com/element-hq/dendrite/roomserver/types"
 	syncTypes "github.com/element-hq/dendrite/syncapi/types"
@@ -150,6 +151,10 @@ func (t *TxnReq) ProcessTransaction(ctx context.Context) (*fclient.RespSend, *ut
 				}
 			} */
 			util.GetLogger(ctx).WithError(err).Debugf("Transaction: Failed to parse event JSON of event %s", string(pdu))
+			continue
+		}
+		if err = eventutil.CheckUntrustedEvent(event); err != nil {
+			util.GetLogger(ctx).WithError(err).Debug("Transaction: Refusing a malformed event")
 			continue
 		}
 		if event.Type() == spec.MRoomCreate && event.StateKeyEquals("") {
