@@ -130,6 +130,17 @@ func TestSynapseAdminRooms(t *testing.T) {
 			assert.Equal(t, http.StatusNotFound, code)
 			code, _ = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/notaroom", nil)
 			assert.Equal(t, http.StatusBadRequest, code)
+			code, _ = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms/!nothere:test/members", nil)
+			assert.Equal(t, http.StatusNotFound, code, "the members of a room that is not known are not an empty list")
+		})
+
+		t.Run("a huge limit is a limit and not a panic", func(t *testing.T) {
+			code, res := call(admin, http.MethodGet, "/_synapse/admin/v1/rooms?from=1&limit=9223372036854775807", nil)
+			require.Equal(t, http.StatusOK, code, res.Raw)
+			assert.Equal(t, int64(2), res.Get("total_rooms").Int())
+			assert.False(t, res.Get("next_batch").Exists())
+			code, _ = call(admin, http.MethodGet, "/_synapse/admin/v1/rooms?from=9223372036854775807&limit=9223372036854775807", nil)
+			assert.Equal(t, http.StatusOK, code)
 		})
 
 		t.Run("delete", func(t *testing.T) {

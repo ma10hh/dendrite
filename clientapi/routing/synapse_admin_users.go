@@ -227,7 +227,7 @@ func SynapseAdminGetUser(req *http.Request, cfg *config.ClientAPI, userAPI usera
 
 // SynapseAdminPutUser implements PUT /_synapse/admin/v2/users/{userId}: it creates the user, or changes it.
 // nolint:gocyclo
-func SynapseAdminPutUser(req *http.Request, cfg *config.ClientAPI, userAPI userapi.ClientUserAPI) util.JSONResponse {
+func SynapseAdminPutUser(req *http.Request, admin *userapi.Device, cfg *config.ClientAPI, userAPI userapi.ClientUserAPI) util.JSONResponse {
 	userID, localpart, serverName, errResp := localAdminUser(req, cfg)
 	if errResp != nil {
 		return *errResp
@@ -243,6 +243,10 @@ func SynapseAdminPutUser(req *http.Request, cfg *config.ClientAPI, userAPI usera
 	}
 	if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
 		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.NotJSON("The request body could not be decoded: " + err.Error())}
+	}
+	// An administrator who takes their own rights away, or their account, may leave nobody who can use the admin API.
+	if admin != nil && admin.UserID == userID && ((body.Admin != nil && !*body.Admin) || (body.Deactivated != nil && *body.Deactivated)) {
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("You may not demote or deactivate yourself")}
 	}
 	if cfg.MSC3861.Enabled && (body.Password != nil || body.Deactivated != nil) {
 		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.Unknown("Passwords and deactivation are managed by the authentication service")}
@@ -261,6 +265,14 @@ func SynapseAdminPutUser(req *http.Request, cfg *config.ClientAPI, userAPI usera
 		}
 		if err := internal.ValidateUsername(localpart, serverName); err != nil {
 			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidUsername(err.Error())}
+		}
+		// What registration refuses: the numeric names are the ones of guests, and the exclusive namespaces of the
+		// application services are for them.
+		if _, err := strconv.ParseInt(localpart, 10, 64); err == nil {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidUsername("Numeric user IDs are reserved")}
+		}
+		if UsernameMatchesExclusiveNamespaces(cfg, localpart) {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.ASExclusive("This username is in the exclusive namespace of an application service")}
 		}
 		accountType := userapi.AccountTypeUser
 		if body.Admin != nil && *body.Admin {

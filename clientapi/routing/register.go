@@ -394,6 +394,10 @@ func UsernameMatchesExclusiveNamespaces(
 	cfg *config.ClientAPI,
 	username string,
 ) bool {
+	// The expression is made when the configuration is loaded, and there is none without application services.
+	if cfg.Derived == nil || cfg.Derived.ExclusiveApplicationServicesUsernameRegexp == nil {
+		return false
+	}
 	userID := userutil.MakeUserID(username, cfg.Matrix.ServerName)
 	return cfg.Derived.ExclusiveApplicationServicesUsernameRegexp.MatchString(userID)
 }

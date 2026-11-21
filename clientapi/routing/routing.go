@@ -185,7 +185,7 @@ func Setup(
 	synapseAdminRouter.Handle("/admin/v2/users/{userId}",
 		httputil.MakeAdminAPI("synapse_admin_user", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			if req.Method == http.MethodPut {
-				return SynapseAdminPutUser(req, cfg, userAPI)
+				return SynapseAdminPutUser(req, device, cfg, userAPI)
 			}
 			return SynapseAdminGetUser(req, cfg, userAPI)
 		}),

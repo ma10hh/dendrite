@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Upgrade notes
+ - The first start after this update creates two indexes on the media table (`user_id` and `base64hash`, which the quota, the media of a user and the removal of media look up); on a table with millions of rows that takes a moment.
  - Helm chart: `dendrite_config.global.profiling` moved to `profiling` (it was read by the chart only, and the strict configuration check refused it in `dendrite.yaml`), and `dendrite_config.global.metrics.basic_auth.user` is now `username` as in the configuration (the old key was ignored, so the metrics user was never set from the chart). Move your overrides.
  - Dendrite now refuses a configuration with duplicate keys or keys it does not know, and names them with their line numbers. Before, the last of two blocks with the same key silently won and misspelled or removed options (for example `kafka`, `server_key_api` or `pusher_database` from older versions) were ignored. Remove them, or run `generate-config -normalise dendrite.yaml` to write the file out again in the current form: it still reads old configurations. Application service registration files are not affected.
 
@@ -29,6 +30,8 @@
 
 
 ### Bug fixes
+ - Media: a removal (retention, admin API) can no longer delete the file that an upload of the same bytes is about to refer to, an upload of a file that is stored already is charged the bytes received for the quota (a chunked request announces -1), and the media admin list answers 500 for database errors instead of 400 with their text.
+ - Synapse admin API: the list of rooms reads the state in chunks (with SQLite more than about 32,000 member events made it answer 500) and survives a huge `limit`; the members of an unknown room are a 404; `PUT /v2/users` refuses numeric names and the exclusive namespaces of application services as registration does, and an administrator cannot demote or deactivate themselves.
  - Partial-state joins (experimental, off): the stand-in hosts are per room (a second room through the same server had none, and finishing one deleted those of the others), only valid server names count and at most 100; /state and /state_ids refuse a room that is not whole; the resync is not ended by an answer that has no members, and the record is dropped only when nobody of the server is in the room (not in the minute after the join); events from before the join do not get the join-time memberships. With the option off, the background task is not started and no query is made per event for it.
  - `/sync` with `use_state_after` and `lazy_load_members` no longer leaves out the membership events of the timeline of users who sent nothing (a kick, a ban, an invite) or who the client already had (a new display name): a client that follows MSC4222 does not read the state from the timeline. The room keeps its `unread_notifications` when only `state_after` has data.
  - Withdrawing a knock on a room of another server writes the leave event for `/sync`; an invite that came in while the other server was asked is no longer deleted with the knock; errors of that path are returned.

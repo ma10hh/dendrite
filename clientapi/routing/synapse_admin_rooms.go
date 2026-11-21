@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"net/http"
 	"sort"
 	"strconv"
@@ -60,6 +61,9 @@ var (
 	createTuple     = gomatrixserverlib.StateKeyTuple{EventType: spec.MRoomCreate}
 )
 
+// adminRoomsChunk is how many rooms the state is read of in one query.
+const adminRoomsChunk = 200
+
 // adminRooms reads what the room list shows of rooms, from the state of the rooms.
 func adminRooms(req *http.Request, cfg *config.ClientAPI, rsAPI roomserverAPI.ClientRoomserverAPI, roomIDs []string) ([]synapseRoom, error) {
 	ctx := req.Context()
@@ -72,16 +76,22 @@ func adminRooms(req *http.Request, cfg *config.ClientAPI, rsAPI roomserverAPI.Cl
 		isPublished[id] = true
 	}
 
-	var content roomserverAPI.QueryBulkStateContentResponse
-	if err := rsAPI.QueryBulkStateContent(ctx, &roomserverAPI.QueryBulkStateContentRequest{
-		RoomIDs:        roomIDs,
-		AllowWildcards: true,
-		StateTuples: []gomatrixserverlib.StateKeyTuple{
-			nameTuple, aliasTuple, joinRuleTuple, guestTuple, historyTuple, encryptionTuple,
-			{EventType: spec.MRoomMember, StateKey: "*"},
-		},
-	}, &content); err != nil {
-		return nil, err
+	// A chunk of rooms at a time: the query has a variable for every event it reads, which SQLite refuses above about
+	// 32,000, and all the memberships of all the rooms are a lot of memory at once.
+	content := roomserverAPI.QueryBulkStateContentResponse{Rooms: make(map[string]map[gomatrixserverlib.StateKeyTuple]string, len(roomIDs))}
+	for start := 0; start < len(roomIDs); start += adminRoomsChunk {
+		var part roomserverAPI.QueryBulkStateContentResponse
+		if err := rsAPI.QueryBulkStateContent(ctx, &roomserverAPI.QueryBulkStateContentRequest{
+			RoomIDs:        roomIDs[start:min(start+adminRoomsChunk, len(roomIDs))],
+			AllowWildcards: true,
+			StateTuples: []gomatrixserverlib.StateKeyTuple{
+				nameTuple, aliasTuple, joinRuleTuple, guestTuple, historyTuple, encryptionTuple,
+				{EventType: spec.MRoomMember, StateKey: "*"},
+			},
+		}, &part); err != nil {
+			return nil, err
+		}
+		maps.Copy(content.Rooms, part.Rooms)
 	}
 
 	rooms := make([]synapseRoom, 0, len(roomIDs))
@@ -246,7 +256,12 @@ func SynapseAdminListRooms(req *http.Request, cfg *config.ClientAPI, rsAPI rooms
 
 	total := len(rooms)
 	from = min(from, total)
-	page := rooms[from:min(from+limit, total)]
+	// limit can be as large as an integer goes: from+limit must not overflow.
+	end := total
+	if limit < total-from {
+		end = from + limit
+	}
+	page := rooms[from:end]
 	if !needsCreate {
 		if err = addCreateInfo(req, rsAPI, page); err != nil {
 			util.GetLogger(req.Context()).WithError(err).Error("addCreateInfo failed")
@@ -309,6 +324,15 @@ func SynapseAdminRoomMembers(req *http.Request, rsAPI roomserverAPI.ClientRoomse
 	id, errResp := adminRoomID(req)
 	if errResp != nil {
 		return *errResp
+	}
+	// A room that is not known here is a 404, like the details of one.
+	var known roomserverAPI.QueryServerJoinedToRoomResponse
+	if err := rsAPI.QueryServerJoinedToRoom(req.Context(), &roomserverAPI.QueryServerJoinedToRoomRequest{RoomID: id}, &known); err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("QueryServerJoinedToRoom failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	if !known.RoomExists {
+		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Room not found")}
 	}
 	var res roomserverAPI.QueryMembershipsForRoomResponse
 	if err := rsAPI.QueryMembershipsForRoom(req.Context(), &roomserverAPI.QueryMembershipsForRoomRequest{RoomID: id, JoinedOnly: true}, &res); err != nil {

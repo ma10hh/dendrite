@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/element-hq/dendrite/internal/httputil"
 	"github.com/element-hq/dendrite/internal/sqlutil"
 	"github.com/element-hq/dendrite/roomserver"
+	"github.com/element-hq/dendrite/setup/config"
 	"github.com/element-hq/dendrite/setup/jetstream"
 	"github.com/element-hq/dendrite/test"
 	"github.com/element-hq/dendrite/test/testrig"
@@ -122,6 +124,26 @@ func TestSynapseAdminUsers(t *testing.T) {
 			assert.Equal(t, http.StatusBadRequest, code, "usernames are validated")
 			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v2/users/"+bob.ID, map[string]any{"password": "weak"})
 			assert.Equal(t, http.StatusBadRequest, code)
+
+			// What registration refuses, an administrator cannot create either: the numeric names are the guests'.
+			code, res := call(admin, http.MethodPut, "/_synapse/admin/v2/users/@12345:"+string(cfg.Global.ServerName), map[string]any{"password": "a-good-password-1"})
+			assert.Equal(t, http.StatusBadRequest, code, "numeric usernames are reserved: %s", res.Raw)
+			assert.Equal(t, "M_INVALID_USERNAME", res.Get("errcode").String())
+
+			// The exclusive namespaces of the application services are theirs.
+			cfg.ClientAPI.Derived = &config.Derived{}
+			cfg.ClientAPI.Derived.ExclusiveApplicationServicesUsernameRegexp = regexp.MustCompile(`^@bridge_.*:` + regexp.QuoteMeta(string(cfg.Global.ServerName)) + `$`)
+			code, res = call(admin, http.MethodPut, "/_synapse/admin/v2/users/@bridge_ghost:"+string(cfg.Global.ServerName), map[string]any{"password": "a-good-password-1"})
+			assert.Equal(t, http.StatusBadRequest, code, "the namespace of an application service: %s", res.Raw)
+			assert.Equal(t, "M_EXCLUSIVE", res.Get("errcode").String())
+
+			// An administrator does not take their own rights or account away: nobody may be left to use the API.
+			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v2/users/"+admin.ID, map[string]any{"admin": false})
+			assert.Equal(t, http.StatusBadRequest, code, "no self-demotion")
+			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v2/users/"+admin.ID, map[string]any{"deactivated": true})
+			assert.Equal(t, http.StatusBadRequest, code, "no self-deactivation")
+			code, _ = call(admin, http.MethodPut, "/_synapse/admin/v2/users/"+admin.ID, map[string]any{"admin": true, "displayname": "Still admin"})
+			assert.Equal(t, http.StatusOK, code, "changing oneself otherwise is fine")
 		})
 
 		t.Run("password, devices and rooms", func(t *testing.T) {
