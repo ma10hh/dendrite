@@ -41,3 +41,22 @@ The report also says three tests pass that are not in `sytest-whitelist` (`Fails
 | # | Decision | Options | Why | Revert | Status |
 |---|---|---|---|---|---|
 | H10 | Leave `sytest-whitelist` as it is and list the four changes here | Edit it | It is shared with the upstream workflow; the changes are one-line and obvious, so they are cheap to apply after review | none | open |
+
+## Sytest with Postgres, and the lists (2026-11-21)
+
+Postgres mode (`POSTGRES=1`): **724 ok, 45 not ok, no whitelisted test failed**, exit 0, the same numbers as SQLite with H9. Both databases are clean now.
+
+| # | Decision | Options | Why | Revert | Status |
+|---|---|---|---|---|---|
+| H10 (changed) | `sytest-whitelist` gets the three tests that pass (`Fails to replace cross-signing keys with no auth`, `HS will proxy request for 3PU mapping`, `HS will proxy request for 3PL mapping`) and `sytest-blacklist` loses `New federated private chats get full presence information (SYN-115)`, which passes and was in both lists. The user said to carry on with the rest of phase 6, and the plan asks for a grown whitelist | Leave it for review | Both SQLite and Postgres runs show the same four lines; the edit is four lines and easy to take back | `git checkout sytest-whitelist sytest-blacklist` | open |
+| H11 | **The first two Complement runs were run without the build tag `dendrite_blacklist`**, with which Complement skips the tests that Dendrite is known not to support (`runtime.SkipIf([dendrite])` prints a warning and runs the test when there is no tag). So the failure counts of the first two runs include many tests that upstream skips: `TestFilter`, `TestTxnInEvent`, `TestAsyncUpload`, `TestRegistration` and others. The comparison between `main` and the checkout is still fair; the totals are not. A run with the tag follows, on the checkout and on `main` | Report the first numbers as they are | They would say the fork is worse than it is | none | open |
+
+## Complement with the tag (2026-11-21)
+
+With `-tags dendrite_blacklist`: `main` 402 pass / 36 fail / 59 skip, checkout 402 / 36 / 59, test by test the same. The 23 failing tests all have `host.docker.internal` timeouts in their logs (H7), so the fork has no failure of its own in `./tests ./tests/csapi` on this machine, and 23 federation tests are not decided. `docs/development/complement.md` has the commands and the list.
+
+| # | Decision | Options | Why | Revert | Status |
+|---|---|---|---|---|---|
+| H12 | Write the instructions and the numbers into `docs/development/complement.md` (the release guide pointed to it) | Keep the numbers only here | They are the baseline that later runs compare to | Delete the file | open |
+
+| H13 | **The `dendrite_blacklist` skip list hides the tests of the features this fork added** (thread list, room summary, parts of the push rule upgrade tests are skipped). The page `complement.md` says to run those without the tag, and gives the result of the untagged run in which they passed | Report only the tagged run | A clean tagged run would say less about the new features than it seems | Edit the page | open |
