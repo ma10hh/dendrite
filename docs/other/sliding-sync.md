@@ -68,8 +68,8 @@ The design decisions, the sources they were checked against, known limitations a
 `spaces` keeps the rooms that are direct children of any of the given spaces. A child is an `m.space.child` event with a non-empty `via`. Spaces that the user has not joined
 or that do not exist are ignored and subspaces are not followed, as the MSC says. Each filter takes up to 100 entries.
 
-Tags are read from the account data of the user with every request that has a tag filter, so a very large amount of account data makes those requests slower.
-The `spaces` filter reads the children of each space named in the request.
+Tags are read from the account data of the user each time a request with a tag filter is answered, which includes every wake-up of a long poll, so a very large amount of account data makes those requests slower.
+The `spaces` filter reads the children of each space named in the request, each time the request is answered, too; one request may name 100 different spaces at most, of at most 255 bytes each.
 
 ## `state_after` in `/sync`
 

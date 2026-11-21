@@ -40,7 +40,7 @@ func TestLoadLargeAccount(t *testing.T) {
 			}
 			all[i] = r
 		}
-		hn.write(space.Events()[len(space.Events())-rooms/5:]...)
+		hn.write(space.Events()[len(space.Events())-(rooms+4)/5:]...)
 		for _, r := range all {
 			hn.write(r.Events()...)
 		}

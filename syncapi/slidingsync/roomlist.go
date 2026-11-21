@@ -6,7 +6,6 @@
 package slidingsync
 
 import (
-	"slices"
 	"sort"
 
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -128,6 +127,7 @@ type attributeNeeds struct {
 
 func needsFor(req *Request) attributeNeeds {
 	var n attributeNeeds
+	seen := map[string]struct{}{}
 	for _, l := range req.Lists {
 		if l.Filters == nil {
 			continue
@@ -136,7 +136,8 @@ func needsFor(req *Request) attributeNeeds {
 		n.roomType = n.roomType || len(l.Filters.RoomTypes) > 0 || len(l.Filters.NotRoomTypes) > 0
 		n.tags = n.tags || len(l.Filters.Tags) > 0 || len(l.Filters.NotTags) > 0
 		for _, s := range l.Filters.Spaces {
-			if !slices.Contains(n.spaces, s) {
+			if _, ok := seen[s]; !ok {
+				seen[s] = struct{}{}
 				n.spaces = append(n.spaces, s)
 			}
 		}

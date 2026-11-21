@@ -678,7 +678,26 @@ func (s *outputRoomEventsStatements) ReIndex(ctx context.Context, txn *sql.Tx, l
 // sqliteMaxVariables keeps a single statement well below SQLite's bind variable limit.
 const sqliteMaxVariables = 500
 
+// roomActivityQuery is the query of SelectRoomActivity for that many rooms and bump types: the rooms come first as
+// parameters, the types after them.
+//
+// It does one index probe per room, newest first, like the Postgres query: a room costs about as much as its latest
+// event is deep, not as much as its whole history. The unary plus keeps the planner off the exclude_from_sync index.
+func roomActivityQuery(rooms, bumpTypes int) string {
+	values := make([]string, rooms)
+	for i := range values {
+		values[i] = fmt.Sprintf("($%d)", i+1)
+	}
+	return "WITH r(room_id) AS (VALUES " + strings.Join(values, ",") + ")" +
+		" SELECT r.room_id," +
+		" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE ORDER BY e.id DESC LIMIT 1)," +
+		" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE AND e.type IN " +
+		sqlutil.QueryVariadicOffset(bumpTypes, rooms) + " ORDER BY e.id DESC LIMIT 1)" +
+		" FROM r"
+}
+
 func (s *outputRoomEventsStatements) SelectRoomActivity(
+
 	ctx context.Context, txn *sql.Tx, roomIDs []string, bumpTypes []string,
 ) (map[string]types.RoomActivity, error) {
 	result := make(map[string]types.RoomActivity, len(roomIDs))
@@ -695,18 +714,7 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 		for _, evType := range bumpTypes {
 			params = append(params, evType)
 		}
-		values := make([]string, len(chunk))
-		for i := range chunk {
-			values[i] = fmt.Sprintf("($%d)", i+1)
-		}
-		// One index probe per room, newest first, like the Postgres query: a room costs about as much as its latest
-		// event is deep, not as much as its whole history. The unary plus keeps the planner off the exclude_from_sync index.
-		query := "WITH r(room_id) AS (VALUES " + strings.Join(values, ",") + ")" +
-			" SELECT r.room_id," +
-			" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE ORDER BY e.id DESC LIMIT 1)," +
-			" (SELECT e.id FROM syncapi_output_room_events e WHERE e.room_id = r.room_id AND +e.exclude_from_sync = FALSE AND e.type IN " +
-			sqlutil.QueryVariadicOffset(len(bumpTypes), len(chunk)) + " ORDER BY e.id DESC LIMIT 1)" +
-			" FROM r"
+		query := roomActivityQuery(len(chunk), len(bumpTypes))
 
 		var rows *sql.Rows
 		var err error

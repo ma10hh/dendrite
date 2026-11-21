@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/tidwall/gjson"
 
 	"github.com/element-hq/dendrite/internal/caching"
@@ -19,9 +20,15 @@ import (
 )
 
 func TestSyncStateAfter(t *testing.T) {
+	user := test.NewUser(t)
+	bob := test.NewUser(t)
+	room := test.NewRoom(t, user)
+	topic := room.CreateAndInsert(t, user, "m.room.topic", map[string]string{"topic": "first"}, test.WithStateKey(""))
+	lost := room.CreateAndInsert(t, user, "m.room.name", map[string]string{"name": "lost the conflict"}, test.WithStateKey(""))
+	// bob joins and is removed by the user: bob sends nothing in the timeline of the sync that has the removal.
+	bobJoin := room.CreateAndInsert(t, bob, spec.MRoomMember, map[string]string{"membership": "join"}, test.WithStateKey(bob.ID))
+	bobKicked := room.CreateAndInsert(t, user, spec.MRoomMember, map[string]string{"membership": "leave"}, test.WithStateKey(bob.ID))
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
-		user := test.NewUser(t)
-		room := test.NewRoom(t, user)
 		alice := userapi.Device{ID: "ALICEID", UserID: user.ID, AccessToken: "ALICE_BEARER_TOKEN", DisplayName: "Alice", AccountType: userapi.AccountTypeUser}
 
 		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
@@ -33,8 +40,6 @@ func TestSyncStateAfter(t *testing.T) {
 		jsctx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
 		defer jetstream.DeleteAllStreams(jsctx, &cfg.Global.JetStream)
 
-		topic := room.CreateAndInsert(t, user, "m.room.topic", map[string]string{"topic": "first"}, test.WithStateKey(""))
-		lost := room.CreateAndInsert(t, user, "m.room.name", map[string]string{"name": "lost the conflict"}, test.WithStateKey(""))
 		AddPublicRoutes(processCtx, routers, cfg, cm, &natsInstance, &syncUserAPI{accounts: []userapi.Device{alice}}, &syncRoomserverAPI{rooms: []*test.Room{room}}, caches, caching.DisableMetrics)
 
 		sync := func(query map[string]string) gjson.Result {
@@ -83,7 +88,7 @@ func TestSyncStateAfter(t *testing.T) {
 		}
 
 		// The room as it was before: everything but the topic and the name.
-		before := room.Events()[:len(room.Events())-2]
+		before := room.Events()[:len(room.Events())-4]
 		testrig.MustPublishMsgs(t, jsctx, toNATSMsgs(t, cfg, before...)...)
 		first := waitFor(map[string]string{}, before[len(before)-1].EventID())
 		since := first.Get("next_batch").String()
@@ -146,6 +151,18 @@ func TestSyncStateAfter(t *testing.T) {
 		if section.Get("state").Exists() {
 			t.Errorf("`state` must be omitted, got %s", section.Get("state").Raw)
 		}
+		// 4. With lazy loading of members, a membership that changes in the timeline is still in state_after, also if
+		// its user sent nothing: the client does not take state from the timeline, so it would show bob as joined.
+		lazy := `{"room":{"state":{"lazy_load_members":true}}}`
+		testrig.MustPublishMsgs(t, jsctx, toNATSMsgs(t, cfg, bobJoin)...)
+		afterJoin := waitFor(map[string]string{"use_state_after": "true", "filter": lazy}, bobJoin.EventID())
+		since = afterJoin.Get("next_batch").String()
+		testrig.MustPublishMsgs(t, jsctx, toNATSMsgs(t, cfg, bobKicked)...)
+		kicked := waitFor(map[string]string{"since": since, "use_state_after": "true", "filter": lazy}, bobKicked.EventID())
+		if got := stateIDs(roomSection(kicked), "state_after"); !contains(got, bobKicked.EventID()) {
+			t.Errorf("lazy loading dropped the removal of a user who sent nothing from state_after: %v", got)
+		}
+		// Without state_after the removal is in the timeline, which is where such a client takes it from.
 		// Without state_after, state events of the timeline are left out of `state`: the topic is in the timeline.
 		legacy := sync(map[string]string{})
 		if got := stateIDs(roomSection(legacy), "state"); contains(got, topic.EventID()) {

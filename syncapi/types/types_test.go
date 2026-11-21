@@ -203,3 +203,29 @@ func TestJoinResponse_MarshalJSON(t *testing.T) {
 		})
 	}
 }
+
+// The counts of unread notifications go with the room when something else is in its section, and with state_after the
+// state is not in `state`: a room whose only change is in state_after keeps its counts, as it does with `state`.
+func TestJoinResponseKeepsUnreadNotificationsWithStateAfter(t *testing.T) {
+	event := synctypes.ClientEvent{Type: "m.room.name", EventID: "$a", Content: spec.RawJSON(`{}`)}
+	for name, set := range map[string]func(*JoinResponse){
+		"state":                func(jr *JoinResponse) { jr.SetState(StateBeforeTimeline, []synctypes.ClientEvent{event}) },
+		"state_after":          func(jr *JoinResponse) { jr.SetState(StateAfterTimeline, []synctypes.ClientEvent{event}) },
+		"unstable state_after": func(jr *JoinResponse) { jr.SetState(StateAfterTimelineUnstable, []synctypes.ClientEvent{event}) },
+	} {
+		jr := NewJoinResponse()
+		jr.UnreadNotifications.NotificationCount = 3
+		set(jr)
+		raw, err := json.Marshal(jr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &out); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := out["unread_notifications"]; !ok {
+			t.Errorf("%s: unread_notifications is missing from %s", name, raw)
+		}
+	}
+}

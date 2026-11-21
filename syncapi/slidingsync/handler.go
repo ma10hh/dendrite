@@ -41,6 +41,8 @@ const (
 	maxRequiredState = 500
 	// maxFilterEntries bounds the spaces and tags one filter can name.
 	maxFilterEntries = 100
+	// maxFilterEntryLength bounds the length of a space ID or a tag in a filter (a room ID is at most 255 bytes).
+	maxFilterEntryLength = 255
 	// maxExtensionScope bounds the lists and rooms an extension can name.
 	maxExtensionScope = 500
 	// maxTimeout caps how long a request may wait for changes. It stays below the server's write timeout.
@@ -387,6 +389,9 @@ func (h *Handler) noteDeviceActivity(req *http.Request, device *userapi.Device, 
 
 // tooLarge describes the first part of the request that asks for unreasonable amounts of work, or returns "".
 func tooLarge(body *Request) string {
+	// The spaces are looked up for all the lists together, so their number is bounded for the whole request, and
+	// the length of what they name is bounded, because every comparison costs as much as the string is long.
+	spaces := map[string]struct{}{}
 	for name, list := range body.Lists {
 		if len(list.Ranges) > maxRangesPerList {
 			return fmt.Sprintf("list %q has more than %d ranges", name, maxRangesPerList)
@@ -397,6 +402,21 @@ func tooLarge(body *Request) string {
 		if f := list.Filters; f != nil && (len(f.Spaces) > maxFilterEntries || len(f.Tags) > maxFilterEntries || len(f.NotTags) > maxFilterEntries) {
 			return fmt.Sprintf("list %q has more than %d spaces or tags in its filters", name, maxFilterEntries)
 		}
+		if f := list.Filters; f != nil {
+			for _, entries := range [][]string{f.Spaces, f.Tags, f.NotTags} {
+				for _, e := range entries {
+					if len(e) > maxFilterEntryLength {
+						return fmt.Sprintf("list %q has a space or tag of more than %d bytes in its filters", name, maxFilterEntryLength)
+					}
+				}
+			}
+			for _, s := range f.Spaces {
+				spaces[s] = struct{}{}
+			}
+		}
+	}
+	if len(spaces) > maxFilterEntries {
+		return fmt.Sprintf("the lists name more than %d different spaces in all", maxFilterEntries)
 	}
 	for roomID, sub := range body.RoomSubscriptions {
 		if len(sub.RequiredState) > maxRequiredState {

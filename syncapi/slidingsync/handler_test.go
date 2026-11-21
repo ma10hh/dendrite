@@ -271,3 +271,42 @@ func TestSetPresence(t *testing.T) {
 		t.Errorf("no updater: code = %d", code)
 	}
 }
+
+// The spaces of a filter are looked up for all the lists together, so the bound is for the whole request.
+func TestTooLargeBoundsSpacesOverAllLists(t *testing.T) {
+	spaces := func(from, n int) []string {
+		var out []string
+		for i := from; i < from+n; i++ {
+			out = append(out, fmt.Sprintf("!space%d:example.com", i))
+		}
+		return out
+	}
+	lists := func(per, count int) *Request {
+		req := &Request{Lists: map[string]ListRequest{}}
+		for i := 0; i < count; i++ {
+			req.Lists[fmt.Sprintf("list%d", i)] = ListRequest{Filters: &ListFilters{Spaces: spaces(i*per, per)}}
+		}
+		return req
+	}
+	if msg := tooLarge(lists(50, 2)); msg != "" {
+		t.Errorf("100 different spaces are the limit, got %q", msg)
+	}
+	if msg := tooLarge(lists(60, 2)); msg == "" {
+		t.Error("120 different spaces in two lists are over the limit")
+	}
+	// The same spaces in several lists are the same spaces.
+	same := &Request{Lists: map[string]ListRequest{}}
+	for i := 0; i < 50; i++ {
+		same.Lists[fmt.Sprintf("list%d", i)] = ListRequest{Filters: &ListFilters{Spaces: spaces(0, 100)}}
+	}
+	if msg := tooLarge(same); msg != "" {
+		t.Errorf("one hundred spaces named again and again are not over the limit, got %q", msg)
+	}
+	if n := len(needsFor(same).spaces); n != 100 {
+		t.Errorf("needsFor has %d spaces, want the 100 different ones", n)
+	}
+	long := &Request{Lists: map[string]ListRequest{"l": {Filters: &ListFilters{Spaces: []string{"!" + strings.Repeat("a", 300) + ":example.com"}}}}}
+	if msg := tooLarge(long); msg == "" {
+		t.Error("a space ID of 300 bytes is over the limit")
+	}
+}

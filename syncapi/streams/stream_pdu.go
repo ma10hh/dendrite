@@ -358,12 +358,18 @@ func (p *PDUStreamProvider) addRoomDeltaToResponse(
 	}
 
 	if stateFilter.LazyLoadMembers {
+		allState := delta.StateEvents
 		delta.StateEvents, err = p.lazyLoadMembers(
 			ctx, snapshot, delta.RoomID, true, limited, stateFilter,
 			device, recentEvents, delta.StateEvents,
 		)
 		if err != nil && err != sql.ErrNoRows {
 			return r.From, fmt.Errorf("p.lazyLoadMembers: %w", err)
+		}
+		if req.StateMode != types.StateBeforeTimeline {
+			// A client that follows state_after takes the state from there only, not from the timeline: a kick or a
+			// change of a name in the timeline must be in it, whoever sent the events of the timeline.
+			delta.StateEvents = withTimelineMemberships(delta.StateEvents, allState, recentEvents)
 		}
 	}
 
@@ -669,7 +675,35 @@ func (p *PDUStreamProvider) getJoinResponseForCompleteSync(
 	return jr, nil
 }
 
+// withTimelineMemberships adds to the state the membership events that are also in the timeline and that the lazy
+// loading of members left out.
+func withTimelineMemberships(state, all, timeline []*rstypes.HeaderedEvent) []*rstypes.HeaderedEvent {
+	inTimeline := make(map[string]struct{}, len(timeline))
+	for _, ev := range timeline {
+		if ev.Type() == spec.MRoomMember && ev.StateKey() != nil {
+			inTimeline[ev.EventID()] = struct{}{}
+		}
+	}
+	if len(inTimeline) == 0 {
+		return state
+	}
+	have := make(map[string]struct{}, len(state))
+	for _, ev := range state {
+		have[ev.EventID()] = struct{}{}
+	}
+	for _, ev := range all {
+		if _, ok := inTimeline[ev.EventID()]; !ok {
+			continue
+		}
+		if _, ok := have[ev.EventID()]; !ok {
+			state = append(state, ev)
+		}
+	}
+	return state
+}
+
 func (p *PDUStreamProvider) lazyLoadMembers(
+
 	ctx context.Context, snapshot storage.DatabaseTransaction, roomID string,
 	incremental, limited bool, stateFilter *synctypes.StateFilter,
 	device *userapi.Device,
