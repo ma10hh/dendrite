@@ -231,7 +231,7 @@ func (r *FederationInternalAPI) performJoinUsingServer(
 		if len(partialStateServers) == 0 {
 			partialStateServers = []string{string(serverName)}
 		}
-		joinedHosts = consumers.WithPartialStateHosts(joinedHosts, partialStateServers)
+		joinedHosts = consumers.WithPartialStateHosts(roomID, joinedHosts, partialStateServers)
 	}
 	logrus.WithField("room", roomID).Infof("Joined federated room with %d hosts", len(joinedHosts))
 	if _, err = r.db.UpdateRoom(context.Background(), roomID, joinedHosts, nil, true); err != nil {

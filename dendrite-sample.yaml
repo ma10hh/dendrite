@@ -274,7 +274,10 @@ federation_api:
 
   # Whether to join rooms of other servers without the memberships of the room, which are fetched in the
   # background afterwards (MSC3706). Joining a big room takes seconds instead of minutes. Experimental: some
-  # requests that need all the members wait until they have arrived.
+  # requests that need all the members wait until they have arrived. Do not turn it on for a server that people
+  # depend on: an event that fails the check against the full state stays in the current state, and a room with more
+  # than about 20,000 members never becomes whole (see docs/development/decisions.md, entries 75 to 79, and
+  # docs/development/ultrareview-findings.md, 4.5 to 4.8).
   partial_state_joins: false
 
   # deny_networks and allow_networks are the CIDR ranges used to prevent requests

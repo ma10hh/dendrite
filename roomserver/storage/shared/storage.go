@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
+	"sync/atomic"
 
 	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/roomserver/api"
@@ -51,6 +53,11 @@ type Database struct {
 	Purge              tables.Purge
 	UserRoomKeyTable   tables.UserRoomKeys
 	GetRoomUpdaterFn   func(ctx context.Context, roomInfo *types.RoomInfo) (*RoomUpdater, error)
+
+	// partialStateRooms says whether any room has had partial state since the server started or before: if none has,
+	// nothing asks the database, which is the case for a server that does not join rooms with partial state.
+	partialStateOnce  sync.Once
+	partialStateRooms atomic.Bool
 }
 
 // EventDatabase contains all tables needed to work with events
@@ -2283,6 +2290,8 @@ func (s stateEntryByStateKeySorter) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 // MarkRoomPartialState records that the room was joined with part of its state left out.
 func (d *Database) MarkRoomPartialState(ctx context.Context, state types.PartialState) error {
+	d.partialStateMayExist(ctx)
+	d.partialStateRooms.Store(true)
 	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
 		return d.PartialStateTable.InsertPartialState(ctx, txn, state)
 	})
@@ -2290,7 +2299,20 @@ func (d *Database) MarkRoomPartialState(ctx context.Context, state types.Partial
 
 // PartialStateOfRoom returns the record of a room with partial state, or nil if its state is whole.
 func (d *Database) PartialStateOfRoom(ctx context.Context, roomNID types.RoomNID) (*types.PartialState, error) {
+	if !d.partialStateMayExist(ctx) {
+		return nil, nil
+	}
 	return d.PartialStateTable.SelectPartialState(ctx, nil, roomNID)
+}
+
+// partialStateMayExist says whether a room may have partial state: the table has a row when the server starts, or a
+// room has been marked since. It is asked at every event, so it must not cost a query.
+func (d *Database) partialStateMayExist(ctx context.Context) bool {
+	d.partialStateOnce.Do(func() {
+		rooms, err := d.PartialStateTable.SelectAllPartialState(ctx, nil)
+		d.partialStateRooms.Store(err != nil || len(rooms) > 0)
+	})
+	return d.partialStateRooms.Load()
 }
 
 // PartialStateRooms returns the rooms with partial state, the ones joined first at the start.

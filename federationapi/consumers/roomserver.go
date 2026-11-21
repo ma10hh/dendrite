@@ -205,7 +205,7 @@ func (s *OutputRoomEventConsumer) processMessage(ore api.OutputNewRoomEvent, rew
 	if err != nil {
 		return err
 	}
-	addsJoinedHosts = WithPartialStateHosts(addsJoinedHosts, ore.PartialStateServers)
+	addsJoinedHosts = WithPartialStateHosts(ore.Event.RoomID().String(), addsJoinedHosts, ore.PartialStateServers)
 	// Update our copy of the current state.
 	// We keep a copy of the current state because the state at each event is
 	// expressed as a delta against the current state.
@@ -555,18 +555,38 @@ const partialStateHostPrefix = "partial-state:"
 
 // WithPartialStateHosts adds the servers of a room joined with partial state to the joined hosts, as the memberships
 // the hosts are found from are not all in the state, so events would not reach all servers.
-func WithPartialStateHosts(hosts []types.JoinedHost, servers []string) []types.JoinedHost {
+//
+// The servers are named by the server that answered the join, so they are not trusted: only names that are valid
+// server names count, and no more than maxPartialStateHosts of them, as this server sends the events of the room to
+// each of them until it has the memberships.
+func WithPartialStateHosts(roomID string, hosts []types.JoinedHost, servers []string) []types.JoinedHost {
 	known := make(map[spec.ServerName]bool, len(hosts))
 	for _, host := range hosts {
 		known[host.ServerName] = true
 	}
+	added := 0
 	for _, server := range servers {
-		if name := spec.ServerName(server); !known[name] {
-			known[name] = true
-			hosts = append(hosts, types.JoinedHost{MemberEventID: partialStateHostPrefix + server, ServerName: name})
+		name := spec.ServerName(server)
+		if _, _, valid := spec.ParseAndValidateServerName(name); !valid || known[name] {
+			continue
 		}
+		if added >= maxPartialStateHosts {
+			break
+		}
+		known[name] = true
+		added++
+		hosts = append(hosts, types.JoinedHost{MemberEventID: partialStateHostID(roomID, server), ServerName: name})
 	}
 	return hosts
+}
+
+// maxPartialStateHosts is how many servers stand in for the members of a room joined with partial state.
+const maxPartialStateHosts = 100
+
+// partialStateHostID is the member event ID of a stand-in host. It names the room: the ID is unique in the table of
+// joined hosts, and the hosts of one room are replaced when its members came, not the ones of other rooms.
+func partialStateHostID(roomID, server string) string {
+	return partialStateHostPrefix + roomID + ":" + server
 }
 
 // processMembersAdded replaces the servers that stood in for the members of a room joined with partial state by the
@@ -582,7 +602,7 @@ func (s *OutputRoomEventConsumer) processMembersAdded(msg api.OutputMembersAdded
 	}
 	stand := make([]string, 0, len(msg.Servers))
 	for _, server := range msg.Servers {
-		stand = append(stand, partialStateHostPrefix+server)
+		stand = append(stand, partialStateHostID(msg.RoomID, server))
 	}
 	_, err = s.db.UpdateRoom(s.ctx, msg.RoomID, hosts, stand, false)
 	return err

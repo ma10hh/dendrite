@@ -16,6 +16,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/sirupsen/logrus"
+	"github.com/tidwall/gjson"
 
 	"github.com/element-hq/dendrite/internal/eventutil"
 	"github.com/element-hq/dendrite/roomserver/api"
@@ -51,6 +52,9 @@ type PartialStateResyncer struct {
 	Admin *Admin
 	// Interval is how often the rooms are looked at. It defaults to two seconds.
 	Interval time.Duration
+	// LeftGrace is how long after a join a room without members of this server is still waited for. It defaults to a
+	// minute; a negative value is no grace.
+	LeftGrace time.Duration
 
 	mu       sync.Mutex
 	failures map[types.RoomNID]int
@@ -129,11 +133,11 @@ func (r *PartialStateResyncer) Resync(ctx context.Context, partial types.Partial
 	if err != nil || userID == nil {
 		return fmt.Errorf("the user of the join event %s is not known: %v", partial.JoinEventID, err)
 	}
-	if left, lerr := r.userLeft(ctx, info, events[0].SenderID()); lerr != nil {
+	if left, lerr := r.nobodyLocalInRoom(ctx, info, partial); lerr != nil {
 		return lerr
 	} else if left {
 		// Nobody of this server is in the room any more, so there is no state to have.
-		logrus.WithField("room_id", roomIDString).Info("the user of a room with partial state left it, dropping the record")
+		logrus.WithField("room_id", roomIDString).Info("nobody of this server is in a room with partial state any more, dropping the record")
 		return r.DB.ClearRoomPartialState(ctx, partial.RoomNID)
 	}
 
@@ -164,6 +168,7 @@ func (r *PartialStateResyncer) fetchMembers(
 	}
 	var inputs []api.InputRoomEvent
 	var memberIDs []string
+	joined, joinedOfServer := 0, 0
 	for _, ev := range resp.GetStateEvents().UntrustedEvents(info.RoomVersion) {
 		if eventutil.CheckUntrustedEvent(ev) != nil || ev.Type() != spec.MRoomMember || ev.StateKey() == nil || ev.RoomID().String() != join.RoomID().String() {
 			continue
@@ -175,6 +180,17 @@ func (r *PartialStateResyncer) fetchMembers(
 		}
 		inputs = append(inputs, api.InputRoomEvent{Kind: api.KindOutlier, Event: &types.HeaderedEvent{PDU: ev}, Origin: server})
 		memberIDs = append(memberIDs, ev.EventID())
+		if gjson.GetBytes(ev.Content(), "membership").String() == spec.Join {
+			joined++
+			if user, uerr := spec.NewUserID(*ev.StateKey(), true); uerr == nil && user.Domain() == server {
+				joinedOfServer++
+			}
+		}
+	}
+	// The room is whole when this has the memberships. A server that is itself still joining, or that gives a state
+	// without members, must not end the resync: the server was named as one that is in the room, so it has members.
+	if joined == 0 || joinedOfServer == 0 {
+		return fmt.Errorf("the state from %s has %d joined members, %d of that server: it is not the state of the room", server, joined, joinedOfServer)
 	}
 
 	// An event the roomserver rejects is not an error here: it is left out of the state.
@@ -198,14 +214,26 @@ func (r *PartialStateResyncer) fetchMembers(
 	return nil
 }
 
-// userLeft reports whether the user is no longer joined to the room: the state could not be stored by an event of
-// theirs.
-func (r *PartialStateResyncer) userLeft(ctx context.Context, info *types.RoomInfo, sender spec.SenderID) (bool, error) {
-	_, stillInRoom, _, err := r.DB.GetMembership(ctx, info.RoomNID, sender)
+// partialStateLeftGrace is how long after the join a room that has no member of this server is not yet taken for one
+// that everybody left: the membership of the user who joined is written when the roomserver has processed the join
+// event, after the record was made.
+const partialStateLeftGrace = time.Minute
+
+// nobodyLocalInRoom reports whether no user of this server is joined to the room any more. The state is for all of
+// them: the user who joined may have left while another one is in the room now.
+func (r *PartialStateResyncer) nobodyLocalInRoom(ctx context.Context, info *types.RoomInfo, partial types.PartialState) (bool, error) {
+	grace := r.LeftGrace
+	if grace == 0 {
+		grace = partialStateLeftGrace
+	}
+	if time.Since(time.UnixMilli(partial.JoinedAt)) < grace {
+		return false, nil
+	}
+	inRoom, err := r.DB.GetLocalServerInRoom(ctx, info.RoomNID)
 	if err != nil {
 		return false, err
 	}
-	return !stillInRoom, nil
+	return !inRoom, nil
 }
 
 func (r *PartialStateResyncer) due(room types.RoomNID) bool {

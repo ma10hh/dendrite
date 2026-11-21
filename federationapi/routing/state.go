@@ -100,6 +100,15 @@ func getState(
 	if err := ErrorIfLocalServerNotInRoom(ctx, rsAPI, roomID); err != nil {
 		return nil, nil, err
 	}
+	// A room that was joined with partial state has not got all its memberships yet: what this server answers would be
+	// taken for the whole state by the other server, among them one that is resyncing the room itself.
+	var inRoom api.QueryServerJoinedToRoomResponse
+	if err := rsAPI.QueryServerJoinedToRoom(ctx, &api.QueryServerJoinedToRoomRequest{RoomID: roomID}, &inRoom); err != nil {
+		res := util.ErrorResponse(err)
+		return nil, nil, &res
+	} else if inRoom.PartialState {
+		return nil, nil, &util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("The state of the room is not complete on this server")}
+	}
 
 	event, resErr := fetchEvent(ctx, rsAPI, roomID, eventID)
 	if resErr != nil {

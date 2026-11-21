@@ -221,8 +221,11 @@ func (r *RoomserverInternalAPI) SetFederationAPI(fsAPI fsAPI.RoomserverFederatio
 		logrus.WithError(err).Panic("failed to start roomserver input API")
 	}
 
-	// Rooms that were joined with partial state get their full state in the background, also after a restart.
-	go r.PartialStateResyncer.Run(r.ProcessContext.Context())
+	// Rooms that were joined with partial state get their full state in the background, also after a restart. A server
+	// that does not join rooms that way (the default) and has none from before does not start it.
+	if r.partialStateRoomsPossible(r.ProcessContext.Context()) {
+		go r.PartialStateResyncer.Run(r.ProcessContext.Context())
+	}
 }
 
 func (r *RoomserverInternalAPI) SetUserAPI(userAPI userapi.RoomserverUserAPI) {
@@ -375,4 +378,14 @@ func (r *RoomserverInternalAPI) InsertReportedEvent(
 	score int64,
 ) (int64, error) {
 	return r.DB.InsertReportedEvent(ctx, roomID, eventID, reportingUserID, reason, score)
+}
+
+// partialStateRoomsPossible says whether any room can have partial state: this server joins rooms that way, or it
+// has rooms from a time when it did.
+func (r *RoomserverInternalAPI) partialStateRoomsPossible(ctx context.Context) bool {
+	if r.Cfg.FederationAPI.PartialStateJoins {
+		return true
+	}
+	rooms, err := r.DB.PartialStateRooms(ctx)
+	return err != nil || len(rooms) > 0
 }

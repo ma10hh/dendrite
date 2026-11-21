@@ -107,7 +107,7 @@ func (r *Inputer) addMembersInTransaction(ctx context.Context, input *api.InputR
 			}
 		}
 	}
-	if err = r.recheckPartialStateEvents(ctx, updater, roomInfo, members, recorded); err != nil {
+	if err = r.recheckPartialStateEvents(ctx, updater, roomInfo, members, recorded, input.Event.Depth()); err != nil {
 		return 0, fmt.Errorf("rechecking the events of the partial state: %w", err)
 	}
 
@@ -243,7 +243,7 @@ func (r *Inputer) allowedWithAuthMemberships(
 // the state, and is not sent on.
 func (r *Inputer) recheckPartialStateEvents(
 	ctx context.Context, updater *shared.RoomUpdater, roomInfo *types.RoomInfo, members []types.StateEntry,
-	recorded []types.PartialStateEvent,
+	recorded []types.PartialStateEvent, joinDepth int64,
 ) error {
 	if len(recorded) == 0 {
 		return nil
@@ -279,6 +279,12 @@ func (r *Inputer) recheckPartialStateEvents(
 	for _, ev := range events {
 		at, ok := stateOf[ev.EventNID]
 		if !ok || at.BeforeStateSnapshotNID == 0 {
+			continue
+		}
+		// The memberships are those of the time of the join. An event from before the join, one that was backfilled, has
+		// not got them: a user who joined later would count as in the room at that event, which history visibility
+		// checks would take for a reason to show it to the server of that user.
+		if ev.Depth() < joinDepth {
 			continue
 		}
 		before, done := filled[at.BeforeStateSnapshotNID]

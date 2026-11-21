@@ -7,6 +7,7 @@
 package consumers
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -49,16 +50,32 @@ func TestCombineDedup(t *testing.T) {
 
 func TestWithPartialStateHosts(t *testing.T) {
 	known := []types.JoinedHost{{MemberEventID: "$a", ServerName: "a.example"}}
-	got := WithPartialStateHosts(known, []string{"a.example", "b.example", "b.example", "c.example"})
+	got := WithPartialStateHosts("!room:a.example", known, []string{"a.example", "b.example", "b.example", "c.example", "not a server name", "bad..example:99999", ""})
 	want := []types.JoinedHost{
 		{MemberEventID: "$a", ServerName: "a.example"},
-		{MemberEventID: "partial-state:b.example", ServerName: "b.example"},
-		{MemberEventID: "partial-state:c.example", ServerName: "c.example"},
+		{MemberEventID: "partial-state:!room:a.example:b.example", ServerName: "b.example"},
+		{MemberEventID: "partial-state:!room:a.example:c.example", ServerName: "c.example"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
-	if got := WithPartialStateHosts(known, nil); !reflect.DeepEqual(got, known) {
+	if got := WithPartialStateHosts("!room:a.example", known, nil); !reflect.DeepEqual(got, known) {
 		t.Fatalf("nothing to add: got %v", got)
+	}
+
+	// The ID is different in every room: the table of joined hosts has a unique index on it, so a second room through
+	// the same server would have had no stand-in at all.
+	second := WithPartialStateHosts("!other:a.example", nil, []string{"b.example"})
+	if len(second) != 1 || second[0].MemberEventID == want[1].MemberEventID {
+		t.Fatalf("the stand-in of the second room has the ID of the first: %v", second)
+	}
+
+	// A server that answered the join cannot make this one send the room to an unbounded number of servers.
+	var many []string
+	for i := 0; i < 500; i++ {
+		many = append(many, fmt.Sprintf("s%d.example", i))
+	}
+	if got := WithPartialStateHosts("!room:a.example", nil, many); len(got) != maxPartialStateHosts {
+		t.Fatalf("%d stand-in hosts, want at most %d", len(got), maxPartialStateHosts)
 	}
 }

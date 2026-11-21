@@ -48,6 +48,7 @@ func TestJoinWithPartialState(t *testing.T) {
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
 		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
 		defer closeFn()
+		cfg.FederationAPI.PartialStateJoins = true // the resync only runs for a server that joins rooms this way
 		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
 		natsInstance := jetstream.NATSInstance{}
 		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
@@ -122,6 +123,8 @@ type fakeStateFederation struct {
 	// bad is a member event with a room ID that the event library accepts and then panics on.
 	bad   []byte
 	asked atomic.Int32
+	// fail makes the other server not answer.
+	fail atomic.Bool
 }
 
 func (f *fakeStateFederation) QueryJoinedHostServerNamesInRoom(context.Context, *fsapi.QueryJoinedHostServerNamesInRoomRequest, *fsapi.QueryJoinedHostServerNamesInRoomResponse) error {
@@ -130,6 +133,9 @@ func (f *fakeStateFederation) QueryJoinedHostServerNamesInRoom(context.Context, 
 
 func (f *fakeStateFederation) LookupState(_ context.Context, _, _ spec.ServerName, _, _ string, _ gomatrixserverlib.RoomVersion) (gomatrixserverlib.StateResponse, error) {
 	f.asked.Add(1)
+	if f.fail.Load() {
+		return nil, fmt.Errorf("the other server is not there")
+	}
 	events := gomatrixserverlib.NewEventJSONsFromEvents(f.state)
 	if f.bad != nil {
 		events = append(events, f.bad)
@@ -151,6 +157,7 @@ func TestPartialStateResync(t *testing.T) {
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
 		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
 		defer closeFn()
+		cfg.FederationAPI.PartialStateJoins = true // the resync only runs for a server that joins rooms this way
 		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
 		natsInstance := jetstream.NATSInstance{}
 		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
@@ -251,6 +258,7 @@ func TestPartialStateEventsAreChecked(t *testing.T) {
 	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
 		cfg, processCtx, closeFn := testrig.CreateConfig(t, dbType)
 		defer closeFn()
+		cfg.FederationAPI.PartialStateJoins = true            // the resync only runs for a server that joins rooms this way
 		cfg.RoomServer.PartialStateResyncInterval = time.Hour // the test decides when
 		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
 		natsInstance := jetstream.NATSInstance{}
