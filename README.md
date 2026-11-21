@@ -48,8 +48,7 @@ advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
 - Supported: room lists with ranges and the `is_dm`, `is_encrypted`, `is_invite`, `room_types`, `not_room_types`, `spaces`, `tags` and `not_tags` filters, room subscriptions, `required_state`, incremental updates with long polling,
   invites, knocks, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions.
 - `set_presence` is applied like in `/sync`. There is no presence extension, and the `/v4/sync` dialect of the final MSC text is not implemented. See `docs/other/sliding-sync.md`.
-- Sign-in with OIDC ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)) is experimental, see `docs/administration/7_delegated_auth.md`.
-  Whether Element X can sign in to a Dendrite server through Matrix Authentication Service was not verified end to end.
+- Sign-in through the Matrix Authentication Service ([MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861)) is supported, see `docs/administration/7_delegated_auth.md`. The lab in `contrib/mas-lab` runs a scripted client against MAS and this server (161 checks); the Element X app itself has not been run against it by the tests.
 
 To try it:
 
@@ -77,14 +76,30 @@ Things to know:
   `ghcr.io/ma10hh/dendrite-monolith:<tag>`, where the tag is the upstream version followed by `-f` and a build number, for example
   `v0.15.2-f1`. Only `linux/amd64` is built, and there is no `latest` tag. Configuration and volumes work as described in
   [build/docker](build/docker).
-- **No database changes.** This fork adds no tables or migrations, and keeps sliding sync sessions in memory, so you can switch between it and
-  upstream Dendrite without migrating. After a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle.
+- **Database changes.** Sliding sync sessions are kept in memory: after a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle. Other features of this fork add tables and columns (partial-state rooms, blocked rooms, quarantined media, the time of the last download of a media), always by additive migrations that run at startup. Going back to upstream Dendrite or to an older version of this fork is not supported and not tested: take a backup first, see `docs/administration/11_backup_and_upgrade.md`.
 - **Report problems on [this fork's issue tracker](https://github.com/ma10hh/dendrite/issues), not upstream's**, since upstream does not maintain this code. Include the Dendrite
   log around the time and what Element X showed.
 
 More detail: [what is supported and how it behaves](docs/other/sliding-sync.md), and the
 [decision log](docs/development/sliding-sync-decisions.md) with design choices, sources and open questions.
 The code is in [`syncapi/slidingsync`](syncapi/slidingsync).
+
+## Supported features
+
+What this fork does, by area. "Tested" means automated tests on SQLite and PostgreSQL; the lab is `contrib/mas-lab`. Decisions behind each line are in the [decision log](docs/development/decisions.md).
+
+| Area | Status | Notes |
+|---|---|---|
+| Client-server API for Element X: sync, sliding sync (MSC4186), rooms, messages, E2EE keys, cross-signing, push, media | Supported | Sliding sync: no presence extension, not the `/v4/sync` dialect. `/sync` supports `state_after` (MSC4222) |
+| Sign-in through Matrix Authentication Service (MSC3861), provisioning endpoints for MAS, appservice devices (MSC4190), QR login rendezvous (MSC4388) | Supported, tested, lab | Dendrite has no login of its own in this mode. No SSO, SAML, CAS or JWT login: use MAS |
+| Knocking, room summary (MSC3266), thread list (MSC3856), bundled aggregations, URL previews (off by default, with SSRF protection), `context` state, public room types | Supported, tested | Not done: `timestamp_to_event`, `mutual_rooms`, dehydrated devices (MSC3814), peeking, `/events` and `/initialSync` stubs |
+| Federation | Supported | The upstream federation code, with knocking added. Complement runs against this fork, see `docs/development/decisions.md` for the results |
+| Faster joins / partial state (MSC3706) | **Experimental, off, do not enable** | `federation_api.partial_state_joins`. Never tried against a real large room; see decision entries 73 to 79 for what is open |
+| Synapse admin API (users, rooms, block list, media quarantine and deletion, registration tokens) | Supported, tested | What differs from Synapse is in `docs/administration/8_synapse_adminapi.md`. synapse-admin and Draupnir were not run against it |
+| Media: quota per user, deletion of unused media | Supported, tested | Off by default, `docs/administration/9_media.md` |
+| Metrics (Prometheus), backup and upgrade guides, moving from Synapse | Documented | `docs/administration/10_metrics.md` to `12_from_synapse.md`. There is no Synapse importer |
+| Message retention policies, worker mode, high availability | Not supported | One process; scale it up |
+| Element Call, delayed events (MSC4140), MatrixRTC (MSC4143) | Not supported | Out of scope for this fork |
 
 ## Requirements
 
