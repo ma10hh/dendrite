@@ -60,3 +60,24 @@ With `-tags dendrite_blacklist`: `main` 402 pass / 36 fail / 59 skip, checkout 4
 | H12 | Write the instructions and the numbers into `docs/development/complement.md` (the release guide pointed to it) | Keep the numbers only here | They are the baseline that later runs compare to | Delete the file | open |
 
 | H13 | **The `dendrite_blacklist` skip list hides the tests of the features this fork added** (thread list, room summary, parts of the push rule upgrade tests are skipped). The page `complement.md` says to run those without the tag, and gives the result of the untagged run in which they passed | Report only the tagged run | A clean tagged run would say less about the new features than it seems | Edit the page | open |
+
+## Session report: phase 6 (release hardening)
+
+**Done**
+- A **security fix** found by fuzzing: an event with room ID `!:` crashed the roomserver input worker through `/event` (H2). Events from other servers are checked after parsing, and a panic in processing an event fails the event.
+- Fuzz targets for state resolution, untrusted events, sliding sync requests, HTML and URL parsing (H1); 4 minutes each at the end, no further findings.
+- **Sytest** on SQLite and on Postgres: 724 ok, 45 expected fail, no unexpected failure (H8, H9, H10). The SQLite flake (`database is locked` from `createRoom`) is fixed by the busy timeout of the cgo driver.
+- **Complement** run for the first time: with the tag identical to `main`, 23 federation tests undecided because the containers of this machine cannot reach the host (H5, H7, H11, H13, `complement.md`).
+- The README has a table of supported features and the corrections; `releasing.md` has the checklist and the CHANGES.md rules (H3, H4).
+- Last state: 69 packages pass (the Tor and I2P demos need a daemon, as before), the lab passes 161 of 161 with no error in the log.
+
+**Not done, and why**
+- **Soak with real federation and a large room** (plan): needs a second real server and time. Partial state joins stay off for this reason (entries 73 to 79 of `decisions.md`).
+- **The 23 Complement federation tests**: need a machine on which the containers reach the host, or a changed firewall rule here (H7).
+- **Complement `./tests/...` beyond the two directories**, and the faster-joins tests.
+- **`/code-review ultra` of the branches** (plan, section 4): user-triggered and billed; none of phases 1 to 6 had it.
+- WAL for SQLite (H9), the OpenTelemetry move (entry 26), message retention (entry 82), the stale member counts after a partial state resync, the Go 1.26 question (entry 24).
+
+**Entries to review first:** H2 (security fix: consider reporting the library behaviour to `gomatrixserverlib` and telling upstream Dendrite), H9, H10, H13. Everything of this phase is committed on `phase-6-hardening` (nothing pushed).
+
+**Suggested next:** run Complement again on a machine where federation works; run `/code-review ultra` on the phase branches; then decide on turning on partial state joins for a trial server.
