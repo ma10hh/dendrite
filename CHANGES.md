@@ -28,6 +28,7 @@
 
 
 ### Bug fixes
+ - On SQLite with cgo, wait up to 10 seconds for a locked database like the driver without cgo does (the default was 5): rooms created at the same time could fail with a 500 and `database is locked`.
  - **Security:** another server could crash Dendrite with an event whose room ID is `!:` or similar: the event library accepts it, and `RoomID()` and the check of the signatures then panic in the goroutine of the room. Such events are now refused when they arrive, and a panic while an event is processed fails that event instead of stopping the server.
  - Updating a registration token (`uses_allowed`, `expiry_time`) did nothing on SQLite, because SQLite numbered the parameters of the statement by order of appearance.
  - The federation sender no longer panics on an event of a room that was purged, or when the server is shutting down.
