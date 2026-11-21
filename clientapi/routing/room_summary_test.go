@@ -342,6 +342,37 @@ func TestGetRoomSummaryOverFederation(t *testing.T) {
 			t.Error("this server must not be asked")
 		}
 	}
+
+	// The other server answers for itself, not for this user: the rule for rooms of this server holds for the rooms of
+	// other servers as well.
+	answer := func(joinRule string, worldReadable bool, allowed ...string) *summaryFed {
+		return &summaryFed{hierarchy: map[string]fclient.RoomHierarchyResponse{"remote.test": {Room: fclient.RoomHierarchyRoom{
+			PublicRoom:     fclient.PublicRoom{RoomID: "!far:remote.test", Name: "Far away", JoinRule: joinRule, WorldReadable: worldReadable},
+			AllowedRoomIDs: allowed,
+		}}}}
+	}
+	strangerRS := func(memberships map[string]string) *summaryRS {
+		rs := newRS()
+		rs.memberships = memberships
+		return rs
+	}
+	for name, tc := range map[string]struct {
+		fed         *summaryFed
+		memberships map[string]string
+		want        int
+	}{
+		"invite only, not a member":      {answer("invite", false), map[string]string{}, http.StatusNotFound},
+		"invite only, invited":           {answer("invite", false), map[string]string{"!far:remote.test|@alice:test": spec.Invite}, http.StatusOK},
+		"invite only, world readable":    {answer("invite", true), map[string]string{}, http.StatusOK},
+		"public":                         {answer("public", false), map[string]string{}, http.StatusOK},
+		"restricted, not in the space":   {answer("restricted", false, "!space:remote.test"), map[string]string{}, http.StatusNotFound},
+		"restricted, in the space":       {answer("restricted", false, "!space:remote.test"), map[string]string{"!space:remote.test|@alice:test": spec.Join}, http.StatusOK},
+		"restricted, banned from a room": {answer("restricted", false, "!space:remote.test"), map[string]string{"!far:remote.test|@alice:test": spec.Ban, "!space:remote.test|@alice:test": spec.Join}, http.StatusNotFound},
+	} {
+		if code, body := summaryRequest(t, strangerRS(tc.memberships), tc.fed, alice, "!far:remote.test", false, ""); code != tc.want {
+			t.Errorf("%s: %d %s, want %d", name, code, body.Raw, tc.want)
+		}
+	}
 }
 
 func mustMarshal(t *testing.T, v any) []byte {

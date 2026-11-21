@@ -138,6 +138,26 @@ func Threads(
 		return util.ErrorResponse(err)
 	}
 
+	// The count is of the replies the user has not ignored, as in the bundles of /event, /messages and /context.
+	counts := map[string]int{}
+	if len(ignored) > 0 && len(entries) > 0 {
+		roots := make([]string, 0, len(entries))
+		for _, e := range entries {
+			roots = append(roots, e.RootEventID)
+		}
+		bundles, berr := snapshot.RelationBundles(ctx, roomID.String(), roots, device.UserID, true)
+		if berr != nil {
+			return util.ErrorResponse(berr)
+		}
+		for id := range bundles.Threads {
+			for _, child := range bundles.ThreadChildren[id] {
+				if !ignored[child.Sender] {
+					counts[id]++
+				}
+			}
+		}
+	}
+
 	// One pass for the roots and the latest replies, the replies of other users may need a second look below.
 	visible, err := visibleEvents(req, snapshot, rsAPI, *userID, "threads", loaded)
 	if err != nil {
@@ -179,7 +199,11 @@ func Threads(
 			util.GetLogger(ctx).WithError(err2).WithField("event_id", root.EventID()).Error("failed converting a thread root")
 			continue
 		}
-		rootClient.Unsigned = withThreadSummary(rootClient.Unsigned, *latestClient, e.Count, e.Participated)
+		count := e.Count
+		if len(ignored) > 0 {
+			count = counts[e.RootEventID]
+		}
+		rootClient.Unsigned = withThreadSummary(rootClient.Unsigned, *latestClient, count, e.Participated)
 		res.Chunk = append(res.Chunk, *rootClient)
 	}
 

@@ -197,7 +197,12 @@ func PopulatePublicRooms(ctx context.Context, roomIDs []string, rsAPI QueryBulkS
 	}
 	chunk := make([]fclient.PublicRoom, len(roomIDs))
 	i := 0
-	for roomID, data := range stateRes.Rooms {
+	// In the order of the IDs that were asked for: a client that pages through the rooms needs the same order every time.
+	for _, roomID := range roomIDs {
+		data, ok := stateRes.Rooms[roomID]
+		if !ok {
+			continue
+		}
 		pub := fclient.PublicRoom{
 			RoomID: roomID,
 		}

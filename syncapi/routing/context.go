@@ -350,7 +350,7 @@ func applyLazyLoadMembers(
 		var err error
 		ok := false
 		if atEventID != "" {
-			if memberships, ok, err = stateAtEvent(ctx, rsAPI, roomID, atEventID, tuples); err != nil {
+			if memberships, ok, err = stateAtEvent(ctx, rsAPI, roomID, atEventID, tuples, false); err != nil {
 				return nil, err
 			}
 		}

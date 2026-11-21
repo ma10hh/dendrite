@@ -120,6 +120,20 @@ func (r *Queryer) QueryStateAfterEvents(
 		stateEntries, err = roomState.LoadCombinedStateAfterEvents(
 			ctx, prevStates,
 		)
+		if err == nil && request.OmitMembers && len(request.PrevEventIDs) == 1 {
+			var nids map[string]types.EventTypeNID
+			if nids, err = r.DB.EventTypeNIDs(ctx, []string{spec.MRoomMember}); err == nil {
+				if memberNID, ok := nids[spec.MRoomMember]; ok {
+					kept := stateEntries[:0]
+					for _, entry := range stateEntries {
+						if entry.EventTypeNID != memberNID {
+							kept = append(kept, entry)
+						}
+					}
+					stateEntries = kept
+				}
+			}
+		}
 	} else {
 		// Look up the current state for the requested tuples.
 		stateEntries, err = roomState.LoadStateAfterEventsForStringTuples(

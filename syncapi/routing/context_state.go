@@ -21,13 +21,14 @@ import (
 // stateAtEvent returns the room state after the event, limited to the given state keys if there are any.
 // ok is false if the roomserver does not have the event, so the caller can fall back to the current state.
 func stateAtEvent(
-	ctx context.Context, rsAPI roomserver.SyncRoomserverAPI, roomID, eventID string, tuples []gomatrixserverlib.StateKeyTuple,
+	ctx context.Context, rsAPI roomserver.SyncRoomserverAPI, roomID, eventID string, tuples []gomatrixserverlib.StateKeyTuple, omitMembers bool,
 ) (events []*rstypes.HeaderedEvent, ok bool, err error) {
 	res := roomserver.QueryStateAfterEventsResponse{}
 	err = rsAPI.QueryStateAfterEvents(ctx, &roomserver.QueryStateAfterEventsRequest{
 		RoomID:       roomID,
 		PrevEventIDs: []string{eventID},
 		StateToFetch: tuples,
+		OmitMembers:  omitMembers,
 	}, &res)
 	if err != nil {
 		return nil, false, err
@@ -87,7 +88,8 @@ func contextState(
 	ctx context.Context, snapshot storage.DatabaseTransaction, rsAPI roomserver.SyncRoomserverAPI,
 	roomID, eventID string, filter *synctypes.StateFilter,
 ) ([]*rstypes.HeaderedEvent, error) {
-	state, ok, err := stateAtEvent(ctx, rsAPI, roomID, eventID, nil)
+	// With lazy loading the handler throws the memberships away and asks for the ones of the senders: do not load them.
+	state, ok, err := stateAtEvent(ctx, rsAPI, roomID, eventID, nil, filter.LazyLoadMembers)
 	if err != nil {
 		return nil, err
 	}

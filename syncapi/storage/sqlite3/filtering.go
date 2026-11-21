@@ -104,11 +104,12 @@ func prepareWithFilters(
 // typeClause matches the type column against event types, any of which may end in a * that stands for any characters.
 // The clause is true for a type that matches one of them, or for one that matches none of them if negate is set.
 func typeClause(patterns []string, negate bool, params []interface{}, offset int) (string, []interface{}, int) {
+	// GLOB, not LIKE: LIKE ignores the case of ASCII letters in SQLite, and event types are case sensitive (as they are
+	// with Postgres). In a GLOB pattern * stands for any characters, and ? and [ have to be taken out of their meaning.
 	var exact, like []string
 	for _, p := range patterns {
 		if strings.Contains(p, "*") {
-			escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(p)
-			like = append(like, strings.ReplaceAll(escaped, "*", "%"))
+			like = append(like, strings.NewReplacer("[", "[[]", "?", "[?]").Replace(p))
 		} else {
 			exact = append(exact, p)
 		}
@@ -125,11 +126,11 @@ func typeClause(patterns []string, negate bool, params []interface{}, offset int
 		}
 	}
 	for _, v := range like {
-		op := "LIKE"
+		op := "GLOB"
 		if negate {
-			op = "NOT LIKE"
+			op = "NOT GLOB"
 		}
-		parts = append(parts, fmt.Sprintf(`type %s $%d ESCAPE '\'`, op, offset+1))
+		parts = append(parts, fmt.Sprintf(`type %s $%d`, op, offset+1))
 		params, offset = append(params, v), offset+1
 	}
 	join := " OR "

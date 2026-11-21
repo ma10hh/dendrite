@@ -64,6 +64,10 @@ type QueryStateAfterEventsRequest struct {
 	// The state key tuples to fetch from the state. If none are specified then
 	// the entire resolved room state will be returned.
 	StateToFetch []gomatrixserverlib.StateKeyTuple `json:"state_to_fetch"`
+	// OmitMembers leaves the membership events out of the entire state, for a caller that asks for the ones it needs
+	// by their tuples: a big room has thousands of them. It is ignored for more than one previous event, as the
+	// resolution of their states needs the memberships.
+	OmitMembers bool `json:"omit_members,omitempty"`
 }
 
 // QueryStateAfterEventsResponse is a response to QueryStateAfterEvents

@@ -4,7 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
+	"sync"
+	"time"
 
 	"github.com/matrix-org/gomatrixserverlib/fclient"
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -13,6 +16,41 @@ import (
 	"github.com/element-hq/dendrite/clientapi/httputil"
 	roomserverAPI "github.com/element-hq/dendrite/roomserver/api"
 )
+
+// populatedTTL is how long the state of the published rooms is kept for the requests that filter them: every one of
+// them reads the state of all the rooms, and any server may send them as often as it likes.
+const populatedTTL = 30 * time.Second
+
+type populatedEntry struct {
+	at    time.Time
+	ids   []string
+	rooms []fclient.PublicRoom
+}
+
+var populated struct {
+	sync.Mutex
+	byNetwork map[string]populatedEntry
+}
+
+// populatedPublicRooms returns the published rooms with their state, from a short lived cache if the rooms are the same.
+func populatedPublicRooms(
+	ctx context.Context, rsAPI roomserverAPI.QueryBulkStateContentAPI, networkID string, roomIDs []string, now time.Time,
+) ([]fclient.PublicRoom, error) {
+	populated.Lock()
+	defer populated.Unlock()
+	if entry, ok := populated.byNetwork[networkID]; ok && now.Sub(entry.at) < populatedTTL && slices.Equal(entry.ids, roomIDs) {
+		return entry.rooms, nil
+	}
+	rooms, err := roomserverAPI.PopulatePublicRooms(ctx, roomIDs, rsAPI)
+	if err != nil {
+		return nil, err
+	}
+	if populated.byNetwork == nil {
+		populated.byNetwork = map[string]populatedEntry{}
+	}
+	populated.byNetwork[networkID] = populatedEntry{at: now, ids: slices.Clone(roomIDs), rooms: rooms}
+	return rooms, nil
+}
 
 type PublicRoomReq struct {
 	Since              string `json:"since,omitempty"`
@@ -82,7 +120,7 @@ func publicRooms(
 	total := len(queryRes.RoomIDs)
 	var matching []fclient.PublicRoom
 	if filtering {
-		if matching, err = roomserverAPI.PopulatePublicRooms(ctx, queryRes.RoomIDs, rsAPI); err != nil {
+		if matching, err = populatedPublicRooms(ctx, rsAPI, request.NetworkID, queryRes.RoomIDs, time.Now()); err != nil {
 			return nil, err
 		}
 		matching = roomserverAPI.FilterPublicRooms(matching, request.Filter.SearchTerms, request.Filter.RoomTypes)

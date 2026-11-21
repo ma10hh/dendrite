@@ -131,7 +131,7 @@ func GetRoomSummary(
 			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("Invalid room alias")}
 		}
 		var res roomserverAPI.GetRoomIDForAliasResponse
-		if err = rsAPI.GetRoomIDForAlias(ctx, &roomserverAPI.GetRoomIDForAliasRequest{Alias: roomIDOrAlias, IncludeAppservices: true}, &res); err != nil {
+		if err = rsAPI.GetRoomIDForAlias(ctx, &roomserverAPI.GetRoomIDForAliasRequest{Alias: roomIDOrAlias, IncludeAppservices: device != nil}, &res); err != nil {
 			return internalError(req, "GetRoomIDForAlias", err)
 		}
 		roomID = res.RoomID
@@ -171,6 +171,11 @@ func GetRoomSummary(
 	} else if device != nil {
 		// Ask the servers in the room, the way the room hierarchy does.
 		summary = remoteRoomSummary(req, roomID, vias, cfg, federation)
+		// The servers answer for their own sake, not for this user: a room that is restricted or not world readable
+		// is shown to the ones who could join it, as with a room of this server.
+		if summary != nil && !remoteMayPreview(ctx, rsAPI, device, summary) {
+			summary = nil
+		}
 	}
 	if summary == nil {
 		return summaryNotFound()
@@ -186,6 +191,22 @@ func GetRoomSummary(
 		}
 	}
 	return util.JSONResponse{Code: http.StatusOK, JSON: summary.toJSON(unstable), Headers: map[string]string{"Cache-Control": "no-store"}}
+}
+
+// remoteMayPreview applies the rule of canPreview to the summary that another server gave.
+func remoteMayPreview(ctx context.Context, rsAPI roomserverAPI.ClientRoomserverAPI, device *userapi.Device, s *roomSummary) bool {
+	membership := ""
+	inAllowedRoom := false
+	if userID, err := spec.NewUserID(device.UserID, true); err == nil {
+		var m roomserverAPI.QueryMembershipForUserResponse
+		if err = rsAPI.QueryMembershipForUser(ctx, &roomserverAPI.QueryMembershipForUserRequest{RoomID: s.RoomID, UserID: *userID}, &m); err == nil {
+			membership = m.Membership
+		}
+		if membership != spec.Join {
+			inAllowedRoom = joinedToAny(ctx, rsAPI, device.UserID, s.AllowedRoomIDs)
+		}
+	}
+	return canPreview(true, membership, s.JoinRule, s.WorldReadable, inAllowedRoom)
 }
 
 // localRoomSummary builds the summary from the state this server holds. It returns nil, nil if the requester may not see the room.

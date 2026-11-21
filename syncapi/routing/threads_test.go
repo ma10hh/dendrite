@@ -303,8 +303,8 @@ func TestThreadsHistoryVisibilityAndIgnoredUsers(t *testing.T) {
 		if got := agg.Get("latest_event.event_id").String(); got != early.EventID() {
 			t.Errorf("latest event %s, want carol's reply %s, not %s by the ignored user", got, early.EventID(), late.EventID())
 		}
-		if agg.Get("count").Int() != 2 {
-			t.Errorf("the count stays as it is: %s", agg.Raw)
+		if agg.Get("count").Int() != 1 {
+			t.Errorf("the count is of the replies the user has not ignored (carol's, not bob's), as in /event and /context: %s", agg.Raw)
 		}
 		if err := h.db.UpdateIgnoresForUser(context.Background(), h.alice.ID, &types.IgnoredUsers{List: map[string]interface{}{}}); err != nil {
 			t.Fatal(err)
