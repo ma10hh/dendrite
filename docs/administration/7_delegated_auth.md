@@ -99,7 +99,6 @@ In this mode MAS manages the accounts and devices of the server:
   Run a provider such as [Matrix Authentication Service](https://github.com/element-hq/matrix-authentication-service) or any other OIDC provider.
 - With another provider that provisions nothing, use the client ID and secret mode: accounts and devices are then created on first use.
 - Switching an existing server over does not migrate the old access tokens: they stop working, and users log in again through the provider.
-- [MSC4190](https://github.com/matrix-org/matrix-spec-proposals/pull/4190) (appservice device management) is not implemented.
 
 ## Signing in with a QR code
 
