@@ -34,7 +34,79 @@ If you have further questions, please take a look at [our FAQ](docs/FAQ.md) or j
 - **[#dendrite-dev:matrix.org](https://matrix.to/#/#dendrite-dev:matrix.org)** - The place for developers, where all Dendrite development discussion happens
 - **[#dendrite-alerts:matrix.org](https://matrix.to/#/#dendrite-alerts:matrix.org)** - Release notifications and important info, highly recommended for all Dendrite server admins
 
-Upstream Dendrite does not support [MSC3861](https://github.com/matrix-org/matrix-spec-proposals/pull/3861) (next-gen auth with OIDC), which Element X needs to sign in. This fork has experimental support: see `docs/administration/7_delegated_auth.md`.
+## This fork compared with upstream
+
+The base is upstream `element-hq/dendrite` **0.15.2**. The fork keeps its storage, its configuration and its federation, and adds what
+Element X and an administrator of a small server need. Everything new that changes how the server behaves is **off by default**.
+
+| | Upstream 0.15.2 | This fork (`v0.15.2-f2`) | Default |
+|---|---|---|---|
+| Sync for **Element X** (Simplified Sliding Sync, MSC4186) | No | Yes | On |
+| Sign-in through the **Matrix Authentication Service** (MSC3861), provisioning endpoints for MAS, QR code sign-in (MSC4388), appservice device management (MSC4190) | No | Yes, tested with MAS 1.29.0 in `contrib/mas-lab` | Off (`client_api.msc3861`) |
+| Client API: knocking, thread list, room summary, bundled edits, threads and references, `state_after` in `/sync`, room types in `/publicRooms` | Missing or partial | Yes | On |
+| URL previews, with protection against requests to private networks | No | Yes | Off (`media_api.url_previews`) |
+| Admin API | `/_dendrite/admin` | Also the Synapse admin API at `/_synapse/admin` (users, rooms, block list, media quarantine and deletion, registration tokens) | On, admins only |
+| Media: quota per user, deletion of media nobody downloaded | No | Yes | Off (`media_api.max_user_storage_bytes`, `media_api.retention`) |
+| Metrics | A few | Also the duration of every request, the database pools and the new features | With `global.metrics.enabled` |
+| Joining big rooms without their member list (MSC3706) | No | Experimental, **do not enable** | Off (`federation_api.partial_state_joins`) |
+| Configuration check | Unknown and repeated keys are ignored | **Refused at startup**, with their line numbers | On |
+| Remote crash through an event whose room ID is `!:` (found by fuzzing) | Same code paths, not tested | Fixed | Fixed |
+| Docker image | `ghcr.io/element-hq/dendrite-monolith` | `ghcr.io/ma10hh/dendrite-monolith:<tag>`, `linux/amd64`, no `latest` | |
+
+Not available in either: workers, high availability, message retention policies, and Element Call (delayed events, MatrixRTC).
+
+The whole list with the reasons is in [`CHANGES.md`](CHANGES.md), the decisions behind it in
+[`docs/development/decisions.md`](docs/development/decisions.md), and what the tests say in [the supported features](#supported-features).
+
+## Migrating from upstream Dendrite
+
+For servers on upstream `element-hq/dendrite` (or `matrix-org/dendrite`) **0.15.x**, with PostgreSQL or SQLite. Your users, rooms, media,
+signing key and configuration stay as they are: the fork reads the same databases and the same `dendrite.yaml`.
+
+**What changes in the databases.** On the first start, the migrations add: three tables (`roomserver_partial_state_rooms`,
+`roomserver_partial_state_events`, `roomserver_blocked_rooms`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
+and two indexes on it (`user_id`, `base64hash`: a moment on a table with millions of rows). Nothing is renamed or removed. Sliding sync sessions are
+kept in memory, not in the database.
+
+1. **Start from 0.15.2.** If you are on an older upstream version, update to 0.15.2 first, as its upgrade notes describe, and check that it runs.
+2. **Read the upgrade notes** at the top of [`CHANGES.md`](CHANGES.md).
+3. **Make a backup.** It is the only way back: the fork's migrations only go forward and going back to upstream is neither supported nor tested.
+   Take the signing key (`global.private_key`), `dendrite.yaml`, the databases, the media directory and the JetStream directory,
+   see [backup and upgrade](docs/administration/11_backup_and_upgrade.md).
+4. **Check your configuration.** The fork refuses a configuration with a key it does not know or a key that appears twice, instead of ignoring it
+   (typical: options that upstream removed, such as `kafka`, `server_key_api` or `pusher_database`). Write the file out again and compare:
+
+   ```bash
+   $ ./bin/generate-config -normalise dendrite.yaml > dendrite.normalised.yaml
+   $ diff dendrite.yaml dendrite.normalised.yaml     # the keys that only the left file has are the ones the server would refuse (comments and order differ too)
+   ```
+
+   Remove those keys (or use the normalised file), and check that the server starts. The new options are all in `dendrite-sample.yaml` and all off.
+5. **Switch the program.**
+   - *From source:* build this repository with Go 1.25 or later: `go build -o bin/ ./cmd/...`.
+   - *Docker:* replace the image (`ghcr.io/element-hq/dendrite-monolith` or `matrixdotorg/dendrite-monolith`) by `ghcr.io/ma10hh/dendrite-monolith:v0.15.2-f2` (an explicit tag: there is no `latest`). Volumes and the configuration stay as they are.
+   - *Helm:* use the chart of this repository. Two values moved: `dendrite_config.global.profiling` is now `profiling`, and
+     `dendrite_config.global.metrics.basic_auth.user` is now `username`. Move your overrides.
+6. **Start it and look at the log** for the migrations and for configuration errors. Then check that the server answers and advertises the new sync:
+
+   ```bash
+   $ curl -s http://localhost:8008/_matrix/client/versions | grep simplified_msc3575
+   ```
+
+7. **Reverse proxy:** sliding sync holds requests open for up to three minutes. Set the read timeout to more than that (nginx's default of 60 seconds is
+   too short; [the sample](docs/nginx/dendrite-sample.conf) uses 600).
+8. **Opt in to what you want**, one thing at a time, in `dendrite.yaml`: media quota and retention (see [media storage](docs/administration/9_media.md)),
+   URL previews, metrics ([what to watch](docs/administration/10_metrics.md)). Your existing clients keep working as before.
+9. **Element X** needs sign-in through the Matrix Authentication Service. This is a change for all your users and the one step that is not reversible
+   without a restore, so plan it on its own:
+   - Run MAS and set `client_api.msc3861` with its shared secret, see [delegated authentication](docs/administration/7_delegated_auth.md).
+   - Passwords, registration and logout of Dendrite stop working: the endpoints answer 404, and every client signs in through MAS. Old access tokens stop working,
+     so everybody signs in again, as a new device. They need their recovery key or another signed-in session to get their message keys back.
+   - Dendrite does not import passwords into MAS, and `syn2mas` cannot read a Dendrite database. Create the users in MAS with the **same localparts**. Dendrite matches
+     accounts by localpart, so rooms and history stay with the user. The lab only tests new accounts, not the move of existing ones: try it on a copy first.
+10. **Going back:** stop the server, restore the backup of step 3 (databases, media, JetStream, configuration), and start the upstream version you came from.
+
+Questions and problems go to [this fork's issue tracker](https://github.com/ma10hh/dendrite/issues), not to upstream.
 
 ## Trying out this fork
 
@@ -43,7 +115,7 @@ the API [Element X](https://element.io/) uses for fast login and sync. Upstream 
 have it, so Element X cannot sync with it. There is nothing to enable: build this fork, run it like any Dendrite, and it
 advertises `org.matrix.simplified_msc3575` in `/_matrix/client/versions`.
 
-**Status: in use.** It is used with Element X on a phone (release `0.15.2-f1` of this fork), is covered by unit and integration tests on both SQLite and PostgreSQL,
+**Status: in use.** It is used with Element X on a phone (since release `v0.15.2-f1` of this fork), is covered by unit and integration tests on both SQLite and PostgreSQL,
   and a load test with a 2000 room account is included. Please report what you find.
 - Supported: room lists with ranges and the `is_dm`, `is_encrypted`, `is_invite`, `room_types`, `not_room_types`, `spaces`, `tags` and `not_tags` filters, room subscriptions, `required_state`, incremental updates with long polling,
   invites, knocks, and the `to_device`, `e2ee`, `account_data`, `receipts` and `typing` extensions.
@@ -74,7 +146,7 @@ Things to know:
   `proxy_read_timeout` to 600 seconds.
 - **Container images.** Release builds are published to the GitHub Container Registry as
   `ghcr.io/ma10hh/dendrite-monolith:<tag>`, where the tag is the upstream version followed by `-f` and a build number, for example
-  `v0.15.2-f1`. Only `linux/amd64` is built, and there is no `latest` tag. Configuration and volumes work as described in
+  `v0.15.2-f2`. Only `linux/amd64` is built, and there is no `latest` tag. Configuration and volumes work as described in
   [build/docker](build/docker).
 - **Database changes.** Sliding sync sessions are kept in memory: after a restart, clients are told to start their sync again from scratch (`M_UNKNOWN_POS`), which the MSC requires clients to handle. Other features of this fork add tables and columns (partial-state rooms, blocked rooms, quarantined media, the time of the last download of a media), always by additive migrations that run at startup. Going back to upstream Dendrite or to an older version of this fork is not supported and not tested: take a backup first, see `docs/administration/11_backup_and_upgrade.md`.
 - **Report problems on [this fork's issue tracker](https://github.com/ma10hh/dendrite/issues), not upstream's**, since upstream does not maintain this code. Include the Dendrite
@@ -106,7 +178,7 @@ What this fork does, by area. "Tested" means automated tests on SQLite and Postg
 See the [Planning your Installation](https://element-hq.github.io/dendrite/installation/planning) page for
 more information on requirements.
 
-To build Dendrite, you will need Go 1.21 or later.
+To build Dendrite, you will need Go 1.25 or later.
 
 For a usable federating Dendrite deployment, you will also need:
 
