@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"crypto/ed25519"
+	"sync/atomic"
 
 	"github.com/getsentry/sentry-go"
 	"github.com/matrix-org/gomatrixserverlib"
@@ -61,6 +62,7 @@ type RoomserverInternalAPI struct {
 	Durable                string
 	InputRoomEventTopic    string // JetStream topic for new input room events
 	OutputProducer         *producers.RoomEventProducer
+	eventAtTimestamp       atomic.Pointer[api.EventAtTimestamp]
 	PerspectiveServerNames []spec.ServerName
 	enableMetrics          bool
 	defaultRoomVersion     gomatrixserverlib.RoomVersion
@@ -388,4 +390,18 @@ func (r *RoomserverInternalAPI) partialStateRoomsPossible(ctx context.Context) b
 	}
 	rooms, err := r.DB.PartialStateRooms(ctx)
 	return err != nil || len(rooms) > 0
+}
+
+// SetEventAtTimestamp registers the look-up that answers QueryEventAtTimestamp.
+func (r *RoomserverInternalAPI) SetEventAtTimestamp(f api.EventAtTimestamp) {
+	r.eventAtTimestamp.Store(&f)
+}
+
+// QueryEventAtTimestamp finds the event of the room that is closest to the time, or returns api.ErrNoEventAtTimestamp.
+func (r *RoomserverInternalAPI) QueryEventAtTimestamp(ctx context.Context, roomID string, ts int64, forward bool) (string, int64, error) {
+	f := r.eventAtTimestamp.Load()
+	if f == nil {
+		return "", 0, api.ErrNoEventAtTimestamp
+	}
+	return (*f)(ctx, roomID, ts, forward)
 }

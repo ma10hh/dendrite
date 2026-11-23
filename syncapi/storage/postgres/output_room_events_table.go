@@ -185,30 +185,40 @@ const selectRetentionCandidatesSQL = "" +
 const deleteEventSQL = "" +
 	"DELETE FROM syncapi_output_room_events WHERE event_id = $1"
 
+const selectEventAtTimestampForwardSQL = "" +
+	"SELECT event_id, origin_server_ts FROM syncapi_output_room_events WHERE room_id = $1 AND origin_server_ts > 0 AND origin_server_ts >= $2" +
+	" ORDER BY origin_server_ts ASC, id ASC LIMIT 1"
+
+const selectEventAtTimestampBackwardSQL = "" +
+	"SELECT event_id, origin_server_ts FROM syncapi_output_room_events WHERE room_id = $1 AND origin_server_ts > 0 AND origin_server_ts <= $2" +
+	" ORDER BY origin_server_ts DESC, id DESC LIMIT 1"
+
 const purgeEventsSQL = "" +
 	"DELETE FROM syncapi_output_room_events WHERE room_id = $1"
 
 const selectSearchSQL = "SELECT id, event_id, headered_event_json FROM syncapi_output_room_events WHERE id > $1 AND type = ANY($2) ORDER BY id ASC LIMIT $3"
 
 type outputRoomEventsStatements struct {
-	insertEventStmt                *sql.Stmt
-	selectEventsStmt               *sql.Stmt
-	selectEventsWitFilterStmt      *sql.Stmt
-	selectMaxEventIDStmt           *sql.Stmt
-	selectRecentEventsStmt         *sql.Stmt
-	selectRecentEventsForSyncStmt  *sql.Stmt
-	selectStateInRangeFilteredStmt *sql.Stmt
-	selectStateInRangeStmt         *sql.Stmt
-	updateEventJSONStmt            *sql.Stmt
-	deleteEventsForRoomStmt        *sql.Stmt
-	selectContextEventStmt         *sql.Stmt
-	selectContextBeforeEventStmt   *sql.Stmt
-	selectContextAfterEventStmt    *sql.Stmt
-	purgeEventsStmt                *sql.Stmt
-	selectRetentionCandidatesStmt  *sql.Stmt
-	deleteEventStmt                *sql.Stmt
-	selectSearchStmt               *sql.Stmt
-	selectRoomActivityStmt         *sql.Stmt
+	insertEventStmt                    *sql.Stmt
+	selectEventsStmt                   *sql.Stmt
+	selectEventsWitFilterStmt          *sql.Stmt
+	selectMaxEventIDStmt               *sql.Stmt
+	selectRecentEventsStmt             *sql.Stmt
+	selectRecentEventsForSyncStmt      *sql.Stmt
+	selectStateInRangeFilteredStmt     *sql.Stmt
+	selectStateInRangeStmt             *sql.Stmt
+	updateEventJSONStmt                *sql.Stmt
+	deleteEventsForRoomStmt            *sql.Stmt
+	selectContextEventStmt             *sql.Stmt
+	selectContextBeforeEventStmt       *sql.Stmt
+	selectContextAfterEventStmt        *sql.Stmt
+	purgeEventsStmt                    *sql.Stmt
+	selectRetentionCandidatesStmt      *sql.Stmt
+	deleteEventStmt                    *sql.Stmt
+	selectEventAtTimestampForwardStmt  *sql.Stmt
+	selectEventAtTimestampBackwardStmt *sql.Stmt
+	selectSearchStmt                   *sql.Stmt
+	selectRoomActivityStmt             *sql.Stmt
 }
 
 func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
@@ -269,6 +279,8 @@ func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
 		{&s.purgeEventsStmt, purgeEventsSQL},
 		{&s.selectRetentionCandidatesStmt, selectRetentionCandidatesSQL},
 		{&s.deleteEventStmt, deleteEventSQL},
+		{&s.selectEventAtTimestampForwardStmt, selectEventAtTimestampForwardSQL},
+		{&s.selectEventAtTimestampBackwardStmt, selectEventAtTimestampBackwardSQL},
 		{&s.selectSearchStmt, selectSearchSQL},
 		{&s.selectRoomActivityStmt, selectRoomActivitySQL},
 	}.Prepare(db)
@@ -801,4 +813,13 @@ func (s *outputRoomEventsStatements) SelectRetentionCandidates(ctx context.Conte
 func (s *outputRoomEventsStatements) DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error {
 	_, err := sqlutil.TxStmt(txn, s.deleteEventStmt).ExecContext(ctx, eventID)
 	return err
+}
+
+func (s *outputRoomEventsStatements) SelectEventAtTimestamp(ctx context.Context, txn *sql.Tx, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error) {
+	stmt := s.selectEventAtTimestampBackwardStmt
+	if forward {
+		stmt = s.selectEventAtTimestampForwardStmt
+	}
+	err = sqlutil.TxStmt(txn, stmt).QueryRowContext(ctx, roomID, ts).Scan(&eventID, &originServerTS)
+	return
 }

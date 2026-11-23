@@ -881,3 +881,7 @@ func (d *Database) DeleteEvents(ctx context.Context, roomID string, eventIDs []s
 		return nil
 	})
 }
+
+func (d *DatabaseTransaction) EventAtTimestamp(ctx context.Context, roomID string, ts int64, forward bool) (string, int64, error) {
+	return d.OutputEvents.SelectEventAtTimestamp(ctx, d.txn, roomID, ts, forward)
+}

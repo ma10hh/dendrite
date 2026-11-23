@@ -1755,6 +1755,8 @@ func unstableFeatures(enabledMSCs []string) map[string]bool {
 		"org.matrix.simplified_msc3575": true,
 		// /sync can return state_after instead of state when asked with use_state_after (MSC4222).
 		"org.matrix.msc4222": true,
+		// GET /rooms/{roomId}/timestamp_to_event finds the event closest to a time (MSC3030, stable since v1.6).
+		"org.matrix.msc3030": true,
 	}
 	for _, msc := range enabledMSCs {
 		features["org.matrix."+msc] = true

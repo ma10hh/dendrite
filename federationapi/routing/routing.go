@@ -635,6 +635,15 @@ func Setup(
 		}),
 	).Methods(http.MethodGet)
 
+	for _, path := range []string{"/v1/timestamp_to_event/{roomID}", "/unstable/org.matrix.msc3030/timestamp_to_event/{roomID}"} {
+		fedMux.Handle(path, MakeFedAPI(
+			"federation_timestamp_to_event", cfg.Matrix.ServerName, cfg.Matrix.IsLocalServerName, keys, wakeup,
+			func(httpReq *http.Request, request *fclient.FederationRequest, vars map[string]string) util.JSONResponse {
+				return TimestampToEvent(httpReq, request, rsAPI, vars["roomID"])
+			},
+		)).Methods(http.MethodGet)
+	}
+
 	v1fedmux.Handle("/hierarchy/{roomID}", MakeFedAPI(
 		"federation_room_hierarchy", cfg.Matrix.ServerName, cfg.Matrix.IsLocalServerName, keys, wakeup,
 		func(httpReq *http.Request, request *fclient.FederationRequest, vars map[string]string) util.JSONResponse {

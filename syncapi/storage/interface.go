@@ -76,6 +76,9 @@ type DatabaseTransaction interface {
 	// If no event could be found, returns nil
 	// If there was an issue during the retrieval, returns an error
 	GetStateEvent(ctx context.Context, roomID, evType, stateKey string) (*rstypes.HeaderedEvent, error)
+	// EventAtTimestamp returns the event of the room that is closest to the time (milliseconds), at or after it if forward,
+	// otherwise at or before it. It returns sql.ErrNoRows if there is none.
+	EventAtTimestamp(ctx context.Context, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error)
 	// GetStateEventsForRoom fetches the state events for a given room.
 	// Returns an empty slice if no state events could be found for this room.
 	// Returns an error if there was an issue with the retrieval.

@@ -74,6 +74,9 @@ type Events interface {
 	SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error)
 	// DeleteEvent removes one event.
 	DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error
+	// SelectEventAtTimestamp returns the event of the room that is closest to the time (milliseconds), at or after it if
+	// forward, otherwise at or before it. It returns sql.ErrNoRows if there is none.
+	SelectEventAtTimestamp(ctx context.Context, txn *sql.Tx, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error)
 
 	SelectContextEvent(ctx context.Context, txn *sql.Tx, roomID, eventID string) (int, rstypes.HeaderedEvent, error)
 	SelectContextBeforeEvent(ctx context.Context, txn *sql.Tx, id int, roomID string, filter *synctypes.RoomEventFilter) ([]*rstypes.HeaderedEvent, error)

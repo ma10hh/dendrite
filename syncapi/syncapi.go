@@ -8,6 +8,8 @@ package syncapi
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 
 	"github.com/element-hq/dendrite/internal/fulltext"
 	"github.com/element-hq/dendrite/internal/httputil"
@@ -144,6 +146,19 @@ func AddPublicRoutes(
 	if err = receiptConsumer.Start(); err != nil {
 		logrus.WithError(err).Panicf("failed to start receipts consumer")
 	}
+
+	rsAPI.SetEventAtTimestamp(func(ctx context.Context, roomID string, ts int64, forward bool) (string, int64, error) {
+		snapshot, err := syncDB.NewDatabaseSnapshot(ctx)
+		if err != nil {
+			return "", 0, err
+		}
+		defer snapshot.Rollback() // nolint: errcheck
+		eventID, eventTS, err := snapshot.EventAtTimestamp(ctx, roomID, ts, forward)
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", 0, api.ErrNoEventAtTimestamp
+		}
+		return eventID, eventTS, err
+	})
 
 	retention.Start(processContext.Context(), &dendriteCfg.SyncAPI.Retention, syncDB, rsAPI, fts)
 

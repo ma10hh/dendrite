@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"crypto/ed25519"
+	"errors"
 
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/fclient"
@@ -169,6 +170,8 @@ type QueryMembershipAPI interface {
 
 // API functions required by the syncapi
 type SyncRoomserverAPI interface {
+	// SetEventAtTimestamp registers the look-up that answers QueryEventAtTimestamp.
+	SetEventAtTimestamp(f EventAtTimestamp)
 	// PerformAdminPruneEvents strips the content of the events of the room that are not state events and returns how many it changed.
 	PerformAdminPruneEvents(ctx context.Context, roomID string, eventIDs []string) (int, error)
 	QueryLatestEventsAndStateAPI
@@ -307,6 +310,8 @@ type UserRoomserverAPI interface {
 }
 
 type FederationRoomserverAPI interface {
+	// QueryEventAtTimestamp finds the event of the room that is closest to the time, see EventAtTimestamp.
+	QueryEventAtTimestamp(ctx context.Context, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error)
 	RestrictedJoinAPI
 	InputRoomEventsAPI
 	QueryLatestEventsAndStateAPI
@@ -349,3 +354,11 @@ type FederationRoomserverAPI interface {
 type KeyserverRoomserverAPI interface {
 	QueryLeftUsers(ctx context.Context, req *QueryLeftUsersRequest, res *QueryLeftUsersResponse) error
 }
+
+// ErrNoEventAtTimestamp is what an EventAtTimestamp returns when the room has no event in that direction.
+var ErrNoEventAtTimestamp = errors.New("no event at that time")
+
+// EventAtTimestamp finds the event of a room that is closest to the time (milliseconds), at or after it if forward,
+// otherwise at or before it. It returns ErrNoEventAtTimestamp if there is none. The sync API, which has the timeline of
+// rooms with the times of their events, provides it.
+type EventAtTimestamp func(ctx context.Context, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error)
