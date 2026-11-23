@@ -112,6 +112,11 @@ type DelayedEventsTable interface {
 	// DeleteState removes the delayed state events of the room with the type and state key, and returns their IDs.
 	DeleteState(ctx context.Context, txn *sql.Tx, roomID, eventType, stateKey string) ([]string, error)
 	CountForUser(ctx context.Context, txn *sql.Tx, userID string) (int, error)
+	// The Delete* methods below remove delayed events that can no longer be valid, and return how many.
+	DeleteForUserRoom(ctx context.Context, txn *sql.Tx, userID, roomID string) (int64, error)
+	DeleteForDevice(ctx context.Context, txn *sql.Tx, userID, deviceID string) (int64, error)
+	DeleteForUser(ctx context.Context, txn *sql.Tx, userID string) (int64, error)
+	DeleteForRoom(ctx context.Context, txn *sql.Tx, roomID string) (int64, error)
 }
 
 // AccountRestrictionsTable holds what an administrator has set for an account: a shadow ban, a rate limit and an expiry.

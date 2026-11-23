@@ -47,3 +47,28 @@ func TestRateLimitOverride(t *testing.T) {
 		t.Fatalf("the second is refused, got %+v", res)
 	}
 }
+
+func TestRateLimitBuckets(t *testing.T) {
+	l := NewRateLimits(&config.RateLimiting{Enabled: true, Threshold: 2, CooloffMS: 60000})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	d := &userapi.Device{UserID: "@u:x", ID: "A"}
+	for i := 0; i < 2; i++ {
+		if l.Limit(req, d) != nil {
+			t.Fatalf("request %d of the general bucket must pass", i)
+		}
+	}
+	if l.Limit(req, d) == nil {
+		t.Fatal("the third request of the general bucket is refused")
+	}
+	for i := 0; i < 2; i++ {
+		if l.LimitBucket(req, d, "calls") != nil {
+			t.Fatalf("request %d of the calls bucket must pass although the general one is used up", i)
+		}
+	}
+	if l.LimitBucket(req, d, "calls") == nil {
+		t.Fatal("the calls bucket has its own limit")
+	}
+	if l.Limit(req, &userapi.Device{UserID: "@other:x", ID: "A"}) != nil {
+		t.Fatal("other users are not affected")
+	}
+}

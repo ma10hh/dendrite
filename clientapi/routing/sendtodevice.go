@@ -7,6 +7,7 @@ package routing
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	"github.com/matrix-org/util"
@@ -25,6 +26,7 @@ func SendToDevice(
 	syncProducer *producers.SyncAPIProducer,
 	txnCache *transactions.Cache,
 	eventType string, txnID *string,
+	maxMessages int,
 ) util.JSONResponse {
 	if txnID != nil {
 		if res, ok := txnCache.FetchTransaction(device.AccessToken, *txnID, req.URL); ok {
@@ -38,6 +40,22 @@ func SendToDevice(
 	resErr := httputil.UnmarshalJSONRequest(req, &httpReq)
 	if resErr != nil {
 		return *resErr
+	}
+
+	// One call can reach every device of many users (a device ID of * means all of them), so the size of a request
+	// is bounded: a call with many participants sends its keys to each of them, which is what this is for, but nobody
+	// needs a million.
+	if maxMessages > 0 {
+		count := 0
+		for _, byUser := range httpReq.Messages {
+			count += len(byUser)
+		}
+		if count > maxMessages {
+			return util.JSONResponse{
+				Code: http.StatusRequestEntityTooLarge,
+				JSON: spec.MatrixError{ErrCode: "M_TOO_LARGE", Err: fmt.Sprintf("Too many to-device messages in one request (%d, at most %d)", count, maxMessages)},
+			}
+		}
 	}
 
 	for userID, byUser := range httpReq.Messages {

@@ -11,6 +11,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	mathrand "math/rand"
 	"net/http"
 	"strconv"
 	"sync"
@@ -19,6 +20,8 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/matrix-org/util"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	log "github.com/sirupsen/logrus"
 
 	clienthttputil "github.com/element-hq/dendrite/clientapi/httputil"
@@ -27,6 +30,21 @@ import (
 	roomserverAPI "github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/setup/config"
 	userapi "github.com/element-hq/dendrite/userapi/api"
+)
+
+var (
+	delayedEventsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Namespace: "dendrite",
+		Subsystem: "clientapi",
+		Name:      "delayed_events_total",
+		Help:      "Delayed events by what happened: scheduled, sent, cancelled, retried (a send failed because of the server and is tried again) or failed (dropped)",
+	}, []string{"result"})
+	delayedWaiting = promauto.NewGauge(prometheus.GaugeOpts{
+		Namespace: "dendrite",
+		Subsystem: "clientapi",
+		Name:      "delayed_events_waiting",
+		Help:      "Delayed events with a timer, waiting to be sent",
+	})
 )
 
 // delayParam is the query parameter that turns a send into a delayed event, as MSC4140 names it while it is unstable.
@@ -41,16 +59,19 @@ type delayedEvents struct {
 	userAPI userapi.ClientUserAPI
 	rsAPI   roomserverAPI.ClientRoomserverAPI
 
-	mu     sync.Mutex
-	timers map[string]*time.Timer
+	mu       sync.Mutex
+	timers   map[string]*time.Timer
+	inflight map[string]struct{} // events that are being sent
+	attempts map[string]int      // failed sends of an event, by the server
 }
 
 // NewDelayedEvents makes the scheduler of delayed events. Call Start to load the events that are waiting.
 func NewDelayedEvents(cfg *config.ClientAPI, userAPI userapi.ClientUserAPI, rsAPI roomserverAPI.ClientRoomserverAPI) *delayedEvents {
-	return &delayedEvents{cfg: cfg, userAPI: userAPI, rsAPI: rsAPI, timers: map[string]*time.Timer{}}
+	return &delayedEvents{cfg: cfg, userAPI: userAPI, rsAPI: rsAPI, timers: map[string]*time.Timer{}, inflight: map[string]struct{}{}, attempts: map[string]int{}}
 }
 
-// Start sets the timers of the events that were waiting when the server stopped. Those that are overdue are sent now.
+// Start sets the timers of the events that were waiting when the server stopped. Those that are overdue are sent
+// within a few seconds, spread out so that a long outage does not make them all go at once.
 func (d *delayedEvents) Start(ctx context.Context) error {
 	events, err := d.userAPI.AllDelayedEvents(ctx)
 	if err != nil {
@@ -59,50 +80,81 @@ func (d *delayedEvents) Start(ctx context.Context) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for _, e := range events {
-		d.arm(e)
+		wait := time.Until(time.UnixMilli(e.RunningSinceMS + e.DelayMS))
+		if wait <= 0 {
+			wait = time.Duration(mathrand.Int63n(int64(overdueSpread)))
+		}
+		d.armAfter(e.DelayID, wait)
 	}
 	return nil
 }
 
-// arm sets the timer of the event. The caller holds the lock.
+// overdueSpread is the window that events which were due while the server was down are spread over.
+const overdueSpread = 3 * time.Second
+
+// Retries of an event whose send failed because of the server: the delay before the n-th is retryBase * 2^(n-1).
+const (
+	maxSendAttempts = 5
+	retryBase       = time.Second
+)
+
+// arm sets the timer of the event from its own times. The caller holds the lock.
 func (d *delayedEvents) arm(e userapi.DelayedEvent) {
-	if old, ok := d.timers[e.DelayID]; ok {
+	d.armAfter(e.DelayID, time.Until(time.UnixMilli(e.RunningSinceMS+e.DelayMS)))
+}
+
+// armAfter sets the timer of the event. The caller holds the lock.
+func (d *delayedEvents) armAfter(id string, wait time.Duration) {
+	if old, ok := d.timers[id]; ok {
 		old.Stop()
 	}
-	wait := time.Until(time.UnixMilli(e.RunningSinceMS + e.DelayMS))
-	id := e.DelayID
 	d.timers[id] = time.AfterFunc(max(wait, 0), func() {
 		if res := d.send(context.Background(), id); res.Code != http.StatusOK {
 			log.WithField("delay_id", id).Warnf("A delayed event could not be sent: %d %v", res.Code, res.JSON)
 		}
 	})
+	delayedWaiting.Set(float64(len(d.timers)))
 }
 
 func (d *delayedEvents) disarm(delayID string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.disarmLocked(delayID)
+}
+
+func (d *delayedEvents) disarmLocked(delayID string) {
 	if t, ok := d.timers[delayID]; ok {
 		t.Stop()
 		delete(d.timers, delayID)
+		delayedWaiting.Set(float64(len(d.timers)))
 	}
 }
 
-// send takes the event out and sends it as its user. It answers 404 if the event is not there any more.
+// send sends the event as its user and removes it. It answers 404 if the event is not there any more, or is being sent
+// by another call. **A failure of the server keeps the event** and tries again a few times with growing waits, since
+// losing the "leave" of a call leaves a stale member behind; a refusal (the user may not send it any more) drops it.
+// The price is that a crash between the send and the removal sends the event again on the next start: that is harmless
+// for state events (the same content is not sent twice) but can repeat a message.
 func (d *delayedEvents) send(ctx context.Context, delayID string) util.JSONResponse {
-	d.disarm(delayID)
+	d.mu.Lock()
+	d.disarmLocked(delayID)
+	if _, busy := d.inflight[delayID]; busy {
+		d.mu.Unlock()
+		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Unknown delayed event")}
+	}
+	d.inflight[delayID] = struct{}{}
+	d.mu.Unlock()
+	defer func() {
+		d.mu.Lock()
+		delete(d.inflight, delayID)
+		d.mu.Unlock()
+	}()
+
 	e, err := d.userAPI.DelayedEvent(ctx, delayID)
 	if err != nil {
 		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 	}
 	if e == nil {
-		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Unknown delayed event")}
-	}
-	found, err := d.userAPI.DeleteDelayedEvent(ctx, delayID)
-	if err != nil {
-		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
-	}
-	if !found {
-		// Another request took it between the read and the delete.
 		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Unknown delayed event")}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, "/", bytes.NewReader(e.Content))
@@ -111,7 +163,32 @@ func (d *delayedEvents) send(ctx context.Context, delayID string) util.JSONRespo
 	}
 	device := &userapi.Device{UserID: e.UserID, ID: e.DeviceID}
 	res := SendEvent(req, device, e.RoomID, e.EventType, nil, e.StateKey, d.cfg, d.rsAPI, nil)
-	if res.Code == http.StatusOK && e.StateKey != nil {
+
+	if res.Code >= http.StatusInternalServerError {
+		d.mu.Lock()
+		d.attempts[delayID]++
+		n := d.attempts[delayID]
+		if n < maxSendAttempts {
+			d.armAfter(delayID, retryBase<<(n-1))
+			d.mu.Unlock()
+			delayedEventsTotal.WithLabelValues("retried").Inc()
+			return res
+		}
+		delete(d.attempts, delayID)
+		d.mu.Unlock()
+	}
+	d.mu.Lock()
+	delete(d.attempts, delayID)
+	d.mu.Unlock()
+	if _, err = d.userAPI.DeleteDelayedEvent(ctx, delayID); err != nil {
+		log.WithError(err).WithField("delay_id", delayID).Error("Removing a delayed event that was dealt with failed")
+	}
+	if res.Code != http.StatusOK {
+		delayedEventsTotal.WithLabelValues("failed").Inc()
+		return res
+	}
+	delayedEventsTotal.WithLabelValues("sent").Inc()
+	if e.StateKey != nil {
 		d.cancelState(ctx, e.RoomID, e.EventType, *e.StateKey)
 	}
 	return res
@@ -128,6 +205,7 @@ func (d *delayedEvents) cancelState(ctx context.Context, roomID, eventType, stat
 	for _, id := range ids {
 		d.disarm(id)
 	}
+	delayedEventsTotal.WithLabelValues("cancelled").Add(float64(len(ids)))
 }
 
 func newDelayID() (string, error) {
@@ -217,6 +295,7 @@ func (d *delayedEvents) schedule(req *http.Request, device *userapi.Device, room
 		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 	}
 	d.arm(e)
+	delayedEventsTotal.WithLabelValues("scheduled").Inc()
 	return util.JSONResponse{Code: http.StatusOK, JSON: map[string]string{"delay_id": id}}
 }
 
@@ -266,6 +345,7 @@ func (d *delayedEvents) update(req *http.Request, device *userapi.Device, delayI
 			util.GetLogger(ctx).WithError(err).Error("DeleteDelayedEvent failed")
 			return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
 		}
+		delayedEventsTotal.WithLabelValues("cancelled").Inc()
 	case "restart":
 		d.mu.Lock()
 		defer d.mu.Unlock()
@@ -321,7 +401,7 @@ func setupDelayedEventsRoutes(
 	}
 	handle := func(path, name string, f func(req *http.Request, device *userapi.Device, vars map[string]string) util.JSONResponse, method string) {
 		router.Handle(prefix+path, httputil.MakeAuthAPI(name, userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
-			if r := rateLimits.Limit(req, device); r != nil {
+			if r := rateLimits.LimitBucket(req, device, "calls"); r != nil {
 				return *r
 			}
 			vars, err := httputil.URLDecodeMapValues(mux.Vars(req))
@@ -362,9 +442,74 @@ func setupRTCRoutes(router *mux.Router, cfg *config.ClientAPI, userAPI userapi.C
 		return
 	}
 	router.Handle(prefix+"/rtc/transports", httputil.MakeAuthAPI("rtc_transports", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
-		if r := rateLimits.Limit(req, device); r != nil {
+		if r := rateLimits.LimitBucket(req, device, "calls"); r != nil {
 			return *r
 		}
 		return util.JSONResponse{Code: http.StatusOK, JSON: map[string]any{"rtc_transports": rtcTransports(cfg)}}
 	})).Methods(http.MethodGet, http.MethodOptions)
+}
+
+type adminDelayedEvent struct {
+	delayedEventEntry
+	UserID   string `json:"user_id"`
+	DeviceID string `json:"device_id"`
+}
+
+// adminList implements GET /_synapse/admin/v1/delayed_events[?user_id=]: the delayed events that are waiting, of all
+// users or of one.
+func (d *delayedEvents) adminList(req *http.Request) util.JSONResponse {
+	var events []userapi.DelayedEvent
+	var err error
+	if user := req.URL.Query().Get("user_id"); user != "" {
+		events, err = d.userAPI.DelayedEventsForUser(req.Context(), user)
+	} else {
+		events, err = d.userAPI.AllDelayedEvents(req.Context())
+	}
+	if err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("listing delayed events failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	out := make([]adminDelayedEvent, 0, len(events))
+	for _, e := range events {
+		out = append(out, adminDelayedEvent{
+			delayedEventEntry: delayedEventEntry{
+				DelayID: e.DelayID, RoomID: e.RoomID, Type: e.EventType, StateKey: e.StateKey,
+				Delay: e.DelayMS, RunningSince: e.RunningSinceMS, Content: e.Content,
+			},
+			UserID: e.UserID, DeviceID: e.DeviceID,
+		})
+	}
+	return util.JSONResponse{Code: http.StatusOK, JSON: map[string]any{"delayed_events": out, "total": len(out)}}
+}
+
+// adminCancel implements DELETE /_synapse/admin/v1/delayed_events/{delay_id}: the event is dropped, not sent.
+func (d *delayedEvents) adminCancel(req *http.Request, delayID string) util.JSONResponse {
+	d.disarm(delayID)
+	found, err := d.userAPI.DeleteDelayedEvent(req.Context(), delayID)
+	if err != nil {
+		util.GetLogger(req.Context()).WithError(err).Error("DeleteDelayedEvent failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	if !found {
+		return util.JSONResponse{Code: http.StatusNotFound, JSON: spec.NotFound("Unknown delayed event")}
+	}
+	delayedEventsTotal.WithLabelValues("cancelled").Inc()
+	return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}}
+}
+
+// setupDelayedEventsAdminRoutes registers the administrator's view of the delayed events, if they are enabled.
+func setupDelayedEventsAdminRoutes(router *mux.Router, userAPI userapi.ClientUserAPI, d *delayedEvents) {
+	if d == nil {
+		return
+	}
+	router.Handle("/admin/v1/delayed_events", httputil.MakeAdminAPI("synapse_admin_delayed_events", userAPI, func(req *http.Request, _ *userapi.Device) util.JSONResponse {
+		return d.adminList(req)
+	})).Methods(http.MethodGet, http.MethodOptions)
+	router.Handle("/admin/v1/delayed_events/{delayID}", httputil.MakeAdminAPI("synapse_admin_delayed_event", userAPI, func(req *http.Request, _ *userapi.Device) util.JSONResponse {
+		vars, err := httputil.URLDecodeMapValues(mux.Vars(req))
+		if err != nil {
+			return util.ErrorResponse(err)
+		}
+		return d.adminCancel(req, vars["delayID"])
+	})).Methods(http.MethodDelete, http.MethodOptions)
 }

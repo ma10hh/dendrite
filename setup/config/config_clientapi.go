@@ -68,6 +68,9 @@ type ClientAPI struct {
 	// MatrixRTC says where clients find the media servers of calls (MSC4143).
 	MatrixRTC MatrixRTC `yaml:"matrix_rtc"`
 
+	// MaxToDeviceMessages is how many (user, device) targets one sendToDevice request may have. 0 means no limit.
+	MaxToDeviceMessages int `yaml:"max_to_device_messages"`
+
 	MSCs *MSCs `yaml:"-"`
 }
 
@@ -84,9 +87,11 @@ func (c *ClientAPI) Defaults(opts DefaultOpts) {
 	c.RateLimiting.Defaults()
 	c.DelayedEvents.MaxDelay = 24 * time.Hour
 	c.DelayedEvents.MaxPerUser = 100
+	c.MaxToDeviceMessages = 10000
 }
 
 func (c *ClientAPI) Verify(configErrs *ConfigErrors) {
+	checkPositive(configErrs, "client_api.max_to_device_messages", int64(c.MaxToDeviceMessages))
 	c.TURN.Verify(configErrs)
 	c.RateLimiting.Verify(configErrs)
 	c.MSC3861.Verify(configErrs)

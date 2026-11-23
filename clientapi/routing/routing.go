@@ -526,6 +526,7 @@ func Setup(
 
 	setupDelayedEventsRoutes(v1mux, cfg, userAPI, rateLimits, delayed, "")
 	setupDelayedEventsRoutes(unstableMux, cfg, userAPI, rateLimits, delayed, "/org.matrix.msc4140")
+	setupDelayedEventsAdminRoutes(synapseAdminRouter, userAPI, delayed)
 	setupRTCRoutes(v1mux, cfg, userAPI, rateLimits, "")
 	setupRTCRoutes(unstableMux, cfg, userAPI, rateLimits, "/org.matrix.msc4143")
 
@@ -946,7 +947,7 @@ func Setup(
 				return util.ErrorResponse(err)
 			}
 			txnID := vars["txnID"]
-			return SendToDevice(req, device, syncProducer, transactionsCache, vars["eventType"], &txnID)
+			return SendToDevice(req, device, syncProducer, transactionsCache, vars["eventType"], &txnID, cfg.MaxToDeviceMessages)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPut, http.MethodOptions)
 
@@ -960,7 +961,7 @@ func Setup(
 				return util.ErrorResponse(err)
 			}
 			txnID := vars["txnID"]
-			return SendToDevice(req, device, syncProducer, transactionsCache, vars["eventType"], &txnID)
+			return SendToDevice(req, device, syncProducer, transactionsCache, vars["eventType"], &txnID, cfg.MaxToDeviceMessages)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPut, http.MethodOptions)
 

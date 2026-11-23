@@ -100,6 +100,16 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 	var event *rstypes.HeaderedEvent
 	var isNewRoomEvent bool
 	switch rsapi.OutputType(msg.Header.Get(jetstream.RoomEventType)) {
+	case rsapi.OutputTypePurgeRoom:
+		var output rsapi.OutputEvent
+		if err := json.Unmarshal(msg.Data, &output); err != nil || output.PurgeRoom == nil {
+			log.WithError(err).Errorf("roomserver output log: message parse failure")
+			return true
+		}
+		if _, err := s.db.CancelDelayedEventsForRoom(ctx, output.PurgeRoom.RoomID); err != nil {
+			log.WithError(err).Warn("Cancelling the delayed events of a purged room failed")
+		}
+		return true
 	case rsapi.OutputTypeMembersAdded:
 		var output rsapi.OutputEvent
 		if err := json.Unmarshal(msg.Data, &output); err != nil || output.MembersAdded == nil {
@@ -119,6 +129,7 @@ func (s *OutputRoomEventConsumer) onMessage(ctx context.Context, msgs []*nats.Ms
 		}
 		if isNewRoomEvent {
 			event = output.NewRoomEvent.Event
+			s.cancelDelayedEvents(ctx, output.NewRoomEvent.Event)
 		} else {
 			event = output.NewInviteEvent.Event
 		}
@@ -932,5 +943,27 @@ func (s *OutputRoomEventConsumer) deleteRejectedPushers(ctx context.Context, dev
 				"localpart": localpart,
 			}).WithError(err).Errorf("Unable to delete rejected pusher")
 		}
+	}
+}
+
+// cancelDelayedEvents removes what a user asked to be sent later in a room when they are no longer in it: it would
+// only fail when it is due, or, for a ban that is lifted, send something the user does not mean any more.
+func (s *OutputRoomEventConsumer) cancelDelayedEvents(ctx context.Context, event *rstypes.HeaderedEvent) {
+	if event == nil || event.Type() != spec.MRoomMember || event.StateKey() == nil {
+		return
+	}
+	switch gjson.GetBytes(event.Content(), "membership").String() {
+	case spec.Leave, spec.Ban:
+	default:
+		return
+	}
+	user, err := spec.NewUserID(*event.StateKey(), true)
+	if err != nil || !s.cfg.Matrix.IsLocalServerName(user.Domain()) {
+		return
+	}
+	if n, err := s.db.CancelDelayedEventsForUserRoom(ctx, user.String(), event.RoomID().String()); err != nil {
+		log.WithError(err).WithField("user_id", user.String()).Warn("Cancelling delayed events of a user who left failed")
+	} else if n > 0 {
+		log.WithFields(log.Fields{"user_id": user.String(), "room_id": event.RoomID().String(), "events": n}).Info("Cancelled the delayed events of a user who left the room")
 	}
 }

@@ -44,6 +44,10 @@ const deleteDelayedEventSQL = "DELETE FROM userapi_delayed_events WHERE delay_id
 const restartDelayedEventSQL = "UPDATE userapi_delayed_events SET running_since_ms = $1 WHERE delay_id = $2"
 const selectDelayedStateEventIDsSQL = "SELECT delay_id FROM userapi_delayed_events WHERE room_id = $1 AND event_type = $2 AND state_key = $3"
 const countDelayedEventsForUserSQL = "SELECT COUNT(*) FROM userapi_delayed_events WHERE user_id = $1"
+const deleteDelayedEventsForUserRoomSQL = "DELETE FROM userapi_delayed_events WHERE user_id = $1 AND room_id = $2"
+const deleteDelayedEventsForDeviceSQL = "DELETE FROM userapi_delayed_events WHERE user_id = $1 AND device_id = $2"
+const deleteDelayedEventsForUserSQL = "DELETE FROM userapi_delayed_events WHERE user_id = $1"
+const deleteDelayedEventsForRoomSQL = "DELETE FROM userapi_delayed_events WHERE room_id = $1"
 
 type delayedEventsStatements struct {
 	insertStmt            *sql.Stmt
@@ -54,6 +58,10 @@ type delayedEventsStatements struct {
 	restartStmt           *sql.Stmt
 	selectStateEventsStmt *sql.Stmt
 	countForUserStmt      *sql.Stmt
+	deleteForUserRoomStmt *sql.Stmt
+	deleteForDeviceStmt   *sql.Stmt
+	deleteForUserStmt     *sql.Stmt
+	deleteForRoomStmt     *sql.Stmt
 }
 
 func NewPostgresDelayedEventsTable(db *sql.DB) (tables.DelayedEventsTable, error) {
@@ -70,6 +78,10 @@ func NewPostgresDelayedEventsTable(db *sql.DB) (tables.DelayedEventsTable, error
 		{&s.restartStmt, restartDelayedEventSQL},
 		{&s.selectStateEventsStmt, selectDelayedStateEventIDsSQL},
 		{&s.countForUserStmt, countDelayedEventsForUserSQL},
+		{&s.deleteForUserRoomStmt, deleteDelayedEventsForUserRoomSQL},
+		{&s.deleteForDeviceStmt, deleteDelayedEventsForDeviceSQL},
+		{&s.deleteForUserStmt, deleteDelayedEventsForUserSQL},
+		{&s.deleteForRoomStmt, deleteDelayedEventsForRoomSQL},
 	}.Prepare(db)
 }
 
@@ -185,4 +197,27 @@ func (s *delayedEventsStatements) CountForUser(ctx context.Context, txn *sql.Tx,
 	var n int
 	err := sqlutil.TxStmt(txn, s.countForUserStmt).QueryRowContext(ctx, userID).Scan(&n)
 	return n, err
+}
+
+func rowsAffected(res sql.Result, err error) (int64, error) {
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
+func (s *delayedEventsStatements) DeleteForUserRoom(ctx context.Context, txn *sql.Tx, userID, roomID string) (int64, error) {
+	return rowsAffected(sqlutil.TxStmt(txn, s.deleteForUserRoomStmt).ExecContext(ctx, userID, roomID))
+}
+
+func (s *delayedEventsStatements) DeleteForDevice(ctx context.Context, txn *sql.Tx, userID, deviceID string) (int64, error) {
+	return rowsAffected(sqlutil.TxStmt(txn, s.deleteForDeviceStmt).ExecContext(ctx, userID, deviceID))
+}
+
+func (s *delayedEventsStatements) DeleteForUser(ctx context.Context, txn *sql.Tx, userID string) (int64, error) {
+	return rowsAffected(sqlutil.TxStmt(txn, s.deleteForUserStmt).ExecContext(ctx, userID))
+}
+
+func (s *delayedEventsStatements) DeleteForRoom(ctx context.Context, txn *sql.Tx, roomID string) (int64, error) {
+	return rowsAffected(sqlutil.TxStmt(txn, s.deleteForRoomStmt).ExecContext(ctx, roomID))
 }

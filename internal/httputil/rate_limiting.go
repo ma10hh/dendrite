@@ -59,7 +59,15 @@ func (l *RateLimits) clean() {
 	}
 }
 
+// Limit counts the request against the general limit of the caller.
 func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSONResponse {
+	return l.LimitBucket(req, device, "")
+}
+
+// LimitBucket counts the request against a limit of its own for the caller: requests of one bucket do not use up the
+// slots of another. A client that keeps a call alive with a request every few seconds should not be able to get the
+// rest of its requests refused, nor the other way round.
+func (l *RateLimits) LimitBucket(req *http.Request, device *userapi.Device, bucket string) *util.JSONResponse {
 	// If rate limiting is disabled then do nothing.
 	if !l.enabled {
 		return nil
@@ -88,6 +96,9 @@ func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSON
 				return nil
 			}
 			caller = device.UserID + device.ID
+			if bucket != "" {
+				caller += "|bucket:" + bucket
+			}
 			if o := device.RateLimit; o != nil {
 				// An administrator has set the limit of this user: both 0 means none. The key holds the numbers, so that a
 				// changed limit starts with a new set of slots.

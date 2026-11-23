@@ -247,6 +247,10 @@ client_api:
     # How many delayed events one user may have waiting.
     max_per_user: 100
 
+  # How many (user, device) targets one sendToDevice request may have: a call sends its keys
+  # to each participant that way. A device ID of * counts once. 0 means no limit.
+  max_to_device_messages: 10000
+
   # Where clients find the media servers for calls (MSC4143), announced at
   # /.well-known/matrix/client and /_matrix/client/unstable/org.matrix.msc4143/rtc/transports.
   # Dendrite does not run a media server: this points at your LiveKit and lk-jwt-service.

@@ -35,6 +35,7 @@ that tools such as synapse-admin and Draupnir use, under `/_synapse/admin`. The 
 | `GET /v1/username_available?username=` | `{"available": true}`, or 400 with `M_USER_IN_USE` or `M_INVALID_USERNAME`; the checks of registration |
 | `POST /v1/purge_media_cache?before_ts=` | Deletes the copies of media of other servers that were last used before the time; they are fetched again when asked for. Answers `{"deleted": n}`. Local media and quarantined media stay |
 | `GET /v1/background_updates/status`, `/enabled`, `GET /v1/scheduled_tasks`, `/v1/experimental_features/{userId}` | **Stubs**: Dendrite has none of these, so they answer with an empty list, and a change of an experimental feature is refused (400). They exist so that synapse-admin pages load |
+| `GET /v1/delayed_events[?user_id=]`, `DELETE /v1/delayed_events/{delayId}` | The [delayed events](14_calls.md) that are waiting, with the user and device that scheduled them, and a way to drop one. Only while `client_api.delayed_events` is enabled |
 | `GET /v1/server_version` | |
 | `GET/POST /v1/event_reports`, `POST /v1/send_server_notice`, `/v1/register` | Existing, see their pages |
 

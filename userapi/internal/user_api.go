@@ -343,6 +343,12 @@ func (a *UserInternalAPI) PerformDeviceDeletion(ctx context.Context, req *api.Pe
 	if err != nil {
 		return err
 	}
+	// What the devices had asked to be sent later must not be sent once they are gone.
+	for _, deviceID := range deletedDeviceIDs {
+		if _, derr := a.DB.CancelDelayedEventsForDevice(ctx, req.UserID, deviceID); derr != nil {
+			util.GetLogger(ctx).WithError(derr).Warn("Cancelling the delayed events of a device failed")
+		}
+	}
 	// Ask the keyserver to delete device keys and signatures for those devices
 	deleteReq := &api.PerformDeleteKeysRequest{
 		UserID: req.UserID,
@@ -708,6 +714,9 @@ func (a *UserInternalAPI) PerformAccountDeactivation(ctx context.Context, req *a
 	}
 	deviceRes := &api.PerformDeviceDeletionResponse{}
 	if err = a.PerformDeviceDeletion(ctx, deviceReq, deviceRes); err != nil {
+		return err
+	}
+	if _, err = a.DB.CancelDelayedEventsForUser(ctx, userID); err != nil {
 		return err
 	}
 

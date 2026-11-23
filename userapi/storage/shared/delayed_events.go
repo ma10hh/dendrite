@@ -55,3 +55,39 @@ func (d *Database) DeleteDelayedStateEvents(ctx context.Context, roomID, eventTy
 func (d *Database) CountDelayedEvents(ctx context.Context, userID string) (int, error) {
 	return d.DelayedEvents.CountForUser(ctx, nil, userID)
 }
+
+// CancelDelayedEventsForUserRoom removes the delayed events of a user in a room, which they left or were removed from.
+func (d *Database) CancelDelayedEventsForUserRoom(ctx context.Context, userID, roomID string) (n int64, err error) {
+	err = d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		n, err = d.DelayedEvents.DeleteForUserRoom(ctx, txn, userID, roomID)
+		return err
+	})
+	return
+}
+
+// CancelDelayedEventsForDevice removes the delayed events that were scheduled by a device that has been logged out.
+func (d *Database) CancelDelayedEventsForDevice(ctx context.Context, userID, deviceID string) (n int64, err error) {
+	err = d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		n, err = d.DelayedEvents.DeleteForDevice(ctx, txn, userID, deviceID)
+		return err
+	})
+	return
+}
+
+// CancelDelayedEventsForUser removes all the delayed events of a user, whose account has been deactivated.
+func (d *Database) CancelDelayedEventsForUser(ctx context.Context, userID string) (n int64, err error) {
+	err = d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		n, err = d.DelayedEvents.DeleteForUser(ctx, txn, userID)
+		return err
+	})
+	return
+}
+
+// CancelDelayedEventsForRoom removes the delayed events of a room that has been purged.
+func (d *Database) CancelDelayedEventsForRoom(ctx context.Context, roomID string) (n int64, err error) {
+	err = d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		n, err = d.DelayedEvents.DeleteForRoom(ctx, txn, roomID)
+		return err
+	})
+	return
+}

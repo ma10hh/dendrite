@@ -31,6 +31,7 @@ With `global.metrics.enabled: true` Dendrite serves Prometheus metrics at `/metr
 | `dendrite_mediaapi_download*`, `dendrite_mediaapi_thumbnail*` | counter, histogram | Media requests and sizes |
 | `dendrite_mediaapi_retention_deleted_total{kind}` | counter | Media deleted by the retention, `local` or `remote` |
 | `dendrite_mediaapi_uploads_over_quota_total` | counter | Uploads refused because the user is out of storage |
+| `dendrite_clientapi_delayed_events_total{result}`, `dendrite_clientapi_delayed_events_waiting` | counter, gauge | [Delayed events](14_calls.md): scheduled, sent, cancelled, retried, failed; and how many wait |
 | `dendrite_admin_requests_total{handler,code}` | counter | Calls of the admin APIs (`/_dendrite/admin`, `/_synapse/admin`), by handler and status code |
 | `dendrite_syncapi_retention_deleted_total` | counter | Messages deleted by [message retention](13_message_retention.md) |
 | `dendrite_syncapi_retention_last_run_timestamp_seconds` | gauge | When the last run of that deletion finished (Unix time, 0 before the first). Alert when it stops moving for much more than `sync_api.retention.interval` |

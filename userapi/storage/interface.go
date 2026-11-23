@@ -49,6 +49,10 @@ type DelayedEvent interface {
 	RestartDelayedEvent(ctx context.Context, delayID string, at int64) (bool, error)
 	DeleteDelayedStateEvents(ctx context.Context, roomID, eventType, stateKey string) ([]string, error)
 	CountDelayedEvents(ctx context.Context, userID string) (int, error)
+	CancelDelayedEventsForUserRoom(ctx context.Context, userID, roomID string) (int64, error)
+	CancelDelayedEventsForDevice(ctx context.Context, userID, deviceID string) (int64, error)
+	CancelDelayedEventsForUser(ctx context.Context, userID string) (int64, error)
+	CancelDelayedEventsForRoom(ctx context.Context, roomID string) (int64, error)
 }
 
 type Account interface {
