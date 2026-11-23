@@ -39,6 +39,18 @@ type Profile interface {
 	SetDisplayName(ctx context.Context, localpart string, serverName spec.ServerName, displayName string) (*authtypes.Profile, bool, error)
 }
 
+// DelayedEvent storage, for MSC4140.
+type DelayedEvent interface {
+	InsertDelayedEvent(ctx context.Context, e api.DelayedEvent) error
+	DelayedEvent(ctx context.Context, delayID string) (*api.DelayedEvent, error)
+	DelayedEventsForUser(ctx context.Context, userID string) ([]api.DelayedEvent, error)
+	AllDelayedEvents(ctx context.Context) ([]api.DelayedEvent, error)
+	DeleteDelayedEvent(ctx context.Context, delayID string) (bool, error)
+	RestartDelayedEvent(ctx context.Context, delayID string, at int64) (bool, error)
+	DeleteDelayedStateEvents(ctx context.Context, roomID, eventType, stateKey string) ([]string, error)
+	CountDelayedEvents(ctx context.Context, userID string) (int, error)
+}
+
 type Account interface {
 	// CreateAccount makes a new account with the given login name and password, and creates an empty profile
 	// for this account. If no password is supplied, the account will be a passwordless account. If the
@@ -144,6 +156,7 @@ type Notification interface {
 type UserDatabase interface {
 	Account
 	AccountData
+	DelayedEvent
 	Device
 	KeyBackup
 	LoginToken

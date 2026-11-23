@@ -108,6 +108,18 @@ type ClientUserAPI interface {
 	AdminSetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType AccountType) error
 	// AdminAccountRestrictions returns the shadow ban, the rate limit override and the expiry of an account.
 	AdminAccountRestrictions(ctx context.Context, localpart string, serverName spec.ServerName) (AccountRestrictions, error)
+	InsertDelayedEvent(ctx context.Context, e DelayedEvent) error
+	// DelayedEvent returns the delayed event, or nil.
+	DelayedEvent(ctx context.Context, delayID string) (*DelayedEvent, error)
+	DelayedEventsForUser(ctx context.Context, userID string) ([]DelayedEvent, error)
+	AllDelayedEvents(ctx context.Context) ([]DelayedEvent, error)
+	// DeleteDelayedEvent removes the event and says whether it was there.
+	DeleteDelayedEvent(ctx context.Context, delayID string) (bool, error)
+	// RestartDelayedEvent sets the time the delay started at and says whether the event was there.
+	RestartDelayedEvent(ctx context.Context, delayID string, at int64) (bool, error)
+	// DeleteDelayedStateEvents removes the delayed state events of a room with the type and state key and returns their IDs.
+	DeleteDelayedStateEvents(ctx context.Context, roomID, eventType, stateKey string) ([]string, error)
+	CountDelayedEvents(ctx context.Context, userID string) (int, error)
 	AdminSetShadowBan(ctx context.Context, localpart string, serverName spec.ServerName, banned bool) error
 	// AdminSetRateLimitOverride sets the rate limit of one user, nil removes it.
 	AdminSetRateLimitOverride(ctx context.Context, localpart string, serverName spec.ServerName, limit *RateLimitOverride) error
@@ -1032,6 +1044,22 @@ type AccountListFilter struct {
 }
 
 // AccountListEntry is one account of such a list.
+// DelayedEvent is an event that a user asked to be sent later (MSC4140).
+type DelayedEvent struct {
+	DelayID   string
+	UserID    string
+	DeviceID  string
+	RoomID    string
+	EventType string
+	// StateKey is nil for events that are not state events.
+	StateKey *string
+	Content  json.RawMessage
+	// DelayMS is how long the event waits after RunningSinceMS.
+	DelayMS int64
+	// RunningSinceMS is the time (milliseconds) the delay started or was last restarted at.
+	RunningSinceMS int64
+}
+
 // RateLimitOverride is the rate limit of one user, set by an administrator. Zero for both means no limit.
 type RateLimitOverride struct {
 	MessagesPerSecond float64 `json:"messages_per_second"`

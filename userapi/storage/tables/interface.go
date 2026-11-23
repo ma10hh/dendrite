@@ -98,6 +98,22 @@ type ProfileTable interface {
 	SelectProfilesBySearch(ctx context.Context, searchString string, limit int) ([]authtypes.Profile, error)
 }
 
+// DelayedEventsTable holds the events that users asked to be sent later (MSC4140).
+type DelayedEventsTable interface {
+	Insert(ctx context.Context, txn *sql.Tx, e api.DelayedEvent) error
+	// Select returns the event, or nil.
+	Select(ctx context.Context, txn *sql.Tx, delayID string) (*api.DelayedEvent, error)
+	SelectForUser(ctx context.Context, txn *sql.Tx, userID string) ([]api.DelayedEvent, error)
+	SelectAll(ctx context.Context, txn *sql.Tx) ([]api.DelayedEvent, error)
+	// Delete removes the event and says whether it was there.
+	Delete(ctx context.Context, txn *sql.Tx, delayID string) (bool, error)
+	// Restart sets the time the delay started at and says whether the event was there.
+	Restart(ctx context.Context, txn *sql.Tx, delayID string, at int64) (bool, error)
+	// DeleteState removes the delayed state events of the room with the type and state key, and returns their IDs.
+	DeleteState(ctx context.Context, txn *sql.Tx, roomID, eventType, stateKey string) ([]string, error)
+	CountForUser(ctx context.Context, txn *sql.Tx, userID string) (int, error)
+}
+
 // AccountRestrictionsTable holds what an administrator has set for an account: a shadow ban, a rate limit and an expiry.
 type AccountRestrictionsTable interface {
 	// SelectRestrictions returns the restrictions of the account; the zero value if there are none.

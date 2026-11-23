@@ -48,13 +48,14 @@ Element X and an administrator of a small server need. Everything new that chang
 | Admin API | `/_dendrite/admin` | Also the Synapse admin API at `/_synapse/admin` (users, rooms, block list, media quarantine and deletion, registration tokens, shadow bans, rate limit overrides, account expiry, media statistics) | On, admins only |
 | Media: quota per user, deletion of media nobody downloaded | No | Yes | Off (`media_api.max_user_storage_bytes`, `media_api.retention`) |
 | Message retention policies (`m.room.retention`, MSC1763): old messages are deleted | No | Yes | Off (`sync_api.retention.enabled`) |
+| Delayed events (MSC4140) and the address of a media server for calls (MSC4143), what Element Call needs from a homeserver | No | Yes, no media server | Off (`client_api.delayed_events`, `client_api.matrix_rtc`) |
 | Metrics | A few | Also the duration of every request, the database pools and the new features | With `global.metrics.enabled` |
 | Joining big rooms without their member list (MSC3706) | No | Experimental, **do not enable** | Off (`federation_api.partial_state_joins`) |
 | Configuration check | Unknown and repeated keys are ignored | **Refused at startup**, with their line numbers | On |
 | Remote crash through an event whose room ID is `!:` (found by fuzzing) | Same code paths, not tested | Fixed | Fixed |
 | Docker image | `ghcr.io/element-hq/dendrite-monolith` | `ghcr.io/ma10hh/dendrite-monolith:<tag>`, `linux/amd64`, no `latest` | |
 
-Not available in either: workers, high availability, and Element Call (delayed events, MatrixRTC).
+Not available in either: workers and high availability. Neither has a media server for Element Call.
 
 The whole list with the reasons is in [`CHANGES.md`](CHANGES.md), the decisions behind it in
 [`docs/development/decisions.md`](docs/development/decisions.md), and what the tests say in [the supported features](#supported-features).
@@ -64,8 +65,8 @@ The whole list with the reasons is in [`CHANGES.md`](CHANGES.md), the decisions 
 For servers on upstream `element-hq/dendrite` (or `matrix-org/dendrite`) **0.15.x**, with PostgreSQL or SQLite. Your users, rooms, media,
 signing key and configuration stay as they are: the fork reads the same databases and the same `dendrite.yaml`.
 
-**What changes in the databases.** On the first start, the migrations add: four tables (`roomserver_partial_state_rooms`,
-`roomserver_partial_state_events`, `roomserver_blocked_rooms`, `userapi_account_restrictions`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
+**What changes in the databases.** On the first start, the migrations add: five tables (`roomserver_partial_state_rooms`,
+`roomserver_partial_state_events`, `roomserver_blocked_rooms`, `userapi_account_restrictions`, `userapi_delayed_events`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
 and two indexes on it (`user_id`, `base64hash`: a moment on a table with millions of rows). The sync API events table gets two columns (`origin_server_ts`, `is_state`) and an index,
 and the migration reads every stored event once to fill them, which takes a while on a database with millions of events. Nothing is renamed or removed. Sliding sync sessions are
 kept in memory, not in the database.
@@ -174,7 +175,7 @@ What this fork does, by area. "Tested" means automated tests on SQLite and Postg
 | Metrics (Prometheus), backup and upgrade guides, moving from Synapse | Documented | `docs/administration/10_metrics.md` to `12_from_synapse.md`. There is no Synapse importer |
 | Message retention policies (`m.room.retention`) | Supported, tested | Off by default, `docs/administration/13_message_retention.md`. A migration adds two columns to the sync API events table |
 | Worker mode, high availability | Not supported | One process; scale it up |
-| Element Call, delayed events (MSC4140), MatrixRTC (MSC4143) | Not supported | Out of scope for this fork |
+| Delayed events (MSC4140), MatrixRTC transports (MSC4143) | Supported, tested | Off by default, `docs/administration/14_calls.md`. No media server: bring your own LiveKit |
 
 ## Requirements
 

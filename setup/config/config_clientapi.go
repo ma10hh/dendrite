@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -61,6 +62,12 @@ type ClientAPI struct {
 	// Rendezvous sessions for signing in with a QR code (MSC4388).
 	Rendezvous Rendezvous `yaml:"rendezvous"`
 
+	// DelayedEvents lets users send events later, which Element Call uses (MSC4140).
+	DelayedEvents DelayedEvents `yaml:"delayed_events"`
+
+	// MatrixRTC says where clients find the media servers of calls (MSC4143).
+	MatrixRTC MatrixRTC `yaml:"matrix_rtc"`
+
 	MSCs *MSCs `yaml:"-"`
 }
 
@@ -75,12 +82,16 @@ func (c *ClientAPI) Defaults(opts DefaultOpts) {
 	c.RegistrationDisabled = true
 	c.OpenRegistrationWithoutVerificationEnabled = false
 	c.RateLimiting.Defaults()
+	c.DelayedEvents.MaxDelay = 24 * time.Hour
+	c.DelayedEvents.MaxPerUser = 100
 }
 
 func (c *ClientAPI) Verify(configErrs *ConfigErrors) {
 	c.TURN.Verify(configErrs)
 	c.RateLimiting.Verify(configErrs)
 	c.MSC3861.Verify(configErrs)
+	c.DelayedEvents.Verify(configErrs)
+	c.MatrixRTC.Verify(configErrs)
 	if c.RecaptchaEnabled {
 		if c.RecaptchaSiteVerifyAPI == "" {
 			c.RecaptchaSiteVerifyAPI = "https://www.google.com/recaptcha/api/siteverify"
@@ -178,4 +189,54 @@ type Rendezvous struct {
 	// Open sessions let a new device use this server before it has an account on it, but the
 	// server stores arbitrary short-lived data for anybody.
 	AllowUnauthenticated bool `yaml:"allow_unauthenticated"`
+}
+
+// DelayedEvents configures the events that users ask to be sent later (MSC4140).
+type DelayedEvents struct {
+	// Enabled turns the feature on. Off by default: a client that sends a delay while it is off is refused, not
+	// answered by sending the event at once.
+	Enabled bool `yaml:"enabled"`
+	// MaxDelay is the longest delay a user may ask for.
+	MaxDelay time.Duration `yaml:"max_delay"`
+	// MaxPerUser is how many delayed events one user may have waiting.
+	MaxPerUser int `yaml:"max_per_user"`
+}
+
+func (d *DelayedEvents) Verify(configErrs *ConfigErrors) {
+	if !d.Enabled {
+		return
+	}
+	if d.MaxDelay <= 0 {
+		configErrs.Add("invalid value for config key \"client_api.delayed_events.max_delay\": must be above 0")
+	}
+	if d.MaxPerUser <= 0 {
+		configErrs.Add("invalid value for config key \"client_api.delayed_events.max_per_user\": must be above 0")
+	}
+}
+
+// MatrixRTC is what clients need to find the media servers of calls (MSC4143).
+type MatrixRTC struct {
+	// Transports are the media servers that clients may use, in the order of preference.
+	Transports []RTCTransport `yaml:"transports"`
+}
+
+// RTCTransport is one media server for calls.
+type RTCTransport struct {
+	// Type is "livekit".
+	Type string `yaml:"type"`
+	// LiveKitServiceURL is the URL of the service that hands out LiveKit tokens (lk-jwt-service).
+	LiveKitServiceURL string `yaml:"livekit_service_url"`
+}
+
+func (m *MatrixRTC) Verify(configErrs *ConfigErrors) {
+	for i, t := range m.Transports {
+		key := fmt.Sprintf("client_api.matrix_rtc.transports[%d]", i)
+		if t.Type != "livekit" {
+			configErrs.Add(fmt.Sprintf("invalid value for config key %q: type must be livekit, got %q", key+".type", t.Type))
+			continue
+		}
+		if !strings.HasPrefix(t.LiveKitServiceURL, "https://") && !strings.HasPrefix(t.LiveKitServiceURL, "http://") {
+			configErrs.Add(fmt.Sprintf("invalid value for config key %q: must be an http or https URL", key+".livekit_service_url"))
+		}
+	}
 }

@@ -237,6 +237,24 @@ client_api:
     exempt_user_ids:
     #  - "@user:domain.com"
 
+  # Lets users send events later, and have them sent when a timer runs out unless the user keeps
+  # resetting it (MSC4140). Element Call uses it to remove calls of clients that disconnect.
+  # Off by default. See docs/administration/14_calls.md.
+  delayed_events:
+    enabled: false
+    # The longest delay a user may ask for.
+    max_delay: 24h
+    # How many delayed events one user may have waiting.
+    max_per_user: 100
+
+  # Where clients find the media servers for calls (MSC4143), announced at
+  # /.well-known/matrix/client and /_matrix/client/unstable/org.matrix.msc4143/rtc/transports.
+  # Dendrite does not run a media server: this points at your LiveKit and lk-jwt-service.
+  matrix_rtc:
+    transports: []
+    #  - type: livekit
+    #    livekit_service_url: https://livekit-jwt.example.com
+
 # Configuration for the Federation API.
 federation_api:
   # How many times we will try to resend a failed transaction to a specific server. The

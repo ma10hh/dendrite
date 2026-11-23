@@ -54,6 +54,8 @@ type WellKnownClientResponse struct {
 	Homeserver       WellKnownClientHomeserver  `json:"m.homeserver"`
 	SlidingSyncProxy *WellKnownSlidingSyncProxy `json:"org.matrix.msc3575.proxy,omitempty"`
 	Authentication   *WellKnownAuthentication   `json:"org.matrix.msc2965.authentication,omitempty"`
+	// RTCFoci are the media servers for calls (MSC4143).
+	RTCFoci []rtcTransport `json:"org.matrix.msc4143.rtc_foci,omitempty"`
 }
 
 // Setup registers HTTP handlers with the given ServeMux. It also supplies the given http.Client
@@ -92,6 +94,15 @@ func Setup(
 
 	unstableFeatures := unstableFeatures(cfg.MSCs.MSCs)
 
+	var delayed *delayedEvents
+	if cfg.DelayedEvents.Enabled {
+		delayed = NewDelayedEvents(cfg, userAPI, rsAPI)
+		if err := delayed.Start(context.Background()); err != nil {
+			logrus.WithError(err).Error("Failed to load the delayed events")
+		}
+		unstableFeatures["org.matrix.msc4140"] = true
+	}
+
 	// singleflight protects /join endpoints from being invoked
 	// multiple times from the same user and room, otherwise
 	// a state reset can occur. This also avoids unneeded
@@ -118,6 +129,7 @@ func Setup(
 			if cfg.MSC3861.Enabled {
 				response.Authentication = &WellKnownAuthentication{Issuer: cfg.MSC3861.Issuer}
 			}
+			response.RTCFoci = rtcTransports(cfg)
 			return util.JSONResponse{
 				Code: http.StatusOK,
 				JSON: response,
@@ -454,6 +466,11 @@ func Setup(
 
 	unstableMux := publicAPIMux.PathPrefix("/unstable").Subrouter()
 
+	setupDelayedEventsRoutes(v1mux, cfg, userAPI, rateLimits, delayed, "")
+	setupDelayedEventsRoutes(unstableMux, cfg, userAPI, rateLimits, delayed, "/org.matrix.msc4140")
+	setupRTCRoutes(v1mux, cfg, userAPI, rateLimits, "")
+	setupRTCRoutes(unstableMux, cfg, userAPI, rateLimits, "/org.matrix.msc4143")
+
 	var delegatedAuthProvider *delegatedauth.Provider
 	if cfg.MSC3861.Enabled {
 		logrus.Infof("Authentication is delegated to %s (MSC3861)", cfg.MSC3861.Issuer)
@@ -644,7 +661,7 @@ func Setup(
 			if err != nil {
 				return util.ErrorResponse(err)
 			}
-			return SendEvent(req, device, vars["roomID"], vars["eventType"], nil, nil, cfg, rsAPI, nil)
+			return delayed.sendOrDelay(req, device, vars["roomID"], vars["eventType"], nil, nil, cfg, rsAPI, nil)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPost, http.MethodOptions)
 	v3mux.Handle("/rooms/{roomID}/send/{eventType}/{txnID}",
@@ -654,7 +671,7 @@ func Setup(
 				return util.ErrorResponse(err)
 			}
 			txnID := vars["txnID"]
-			return SendEvent(req, device, vars["roomID"], vars["eventType"], &txnID,
+			return delayed.sendOrDelay(req, device, vars["roomID"], vars["eventType"], &txnID,
 				nil, cfg, rsAPI, transactionsCache)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPut, http.MethodOptions)
@@ -703,7 +720,7 @@ func Setup(
 			}
 			emptyString := ""
 			eventType := strings.TrimSuffix(vars["eventType"], "/")
-			return SendEvent(req, device, vars["roomID"], eventType, nil, &emptyString, cfg, rsAPI, nil)
+			return delayed.sendOrDelay(req, device, vars["roomID"], eventType, nil, &emptyString, cfg, rsAPI, nil)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPut, http.MethodOptions)
 
@@ -714,7 +731,7 @@ func Setup(
 				return util.ErrorResponse(err)
 			}
 			stateKey := vars["stateKey"]
-			return SendEvent(req, device, vars["roomID"], vars["eventType"], nil, &stateKey, cfg, rsAPI, nil)
+			return delayed.sendOrDelay(req, device, vars["roomID"], vars["eventType"], nil, &stateKey, cfg, rsAPI, nil)
 		}, httputil.WithAllowGuests()),
 	).Methods(http.MethodPut, http.MethodOptions)
 

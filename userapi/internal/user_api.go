@@ -1075,3 +1075,37 @@ func (a *UserInternalAPI) applyRestrictions(ctx context.Context, device *api.Dev
 	}
 	return false, nil
 }
+
+// The delayed events of users (MSC4140) are kept here so that they survive a restart; the client API sends them.
+
+func (a *UserInternalAPI) InsertDelayedEvent(ctx context.Context, e api.DelayedEvent) error {
+	return a.DB.InsertDelayedEvent(ctx, e)
+}
+
+func (a *UserInternalAPI) DelayedEvent(ctx context.Context, delayID string) (*api.DelayedEvent, error) {
+	return a.DB.DelayedEvent(ctx, delayID)
+}
+
+func (a *UserInternalAPI) DelayedEventsForUser(ctx context.Context, userID string) ([]api.DelayedEvent, error) {
+	return a.DB.DelayedEventsForUser(ctx, userID)
+}
+
+func (a *UserInternalAPI) AllDelayedEvents(ctx context.Context) ([]api.DelayedEvent, error) {
+	return a.DB.AllDelayedEvents(ctx)
+}
+
+func (a *UserInternalAPI) DeleteDelayedEvent(ctx context.Context, delayID string) (bool, error) {
+	return a.DB.DeleteDelayedEvent(ctx, delayID)
+}
+
+func (a *UserInternalAPI) RestartDelayedEvent(ctx context.Context, delayID string, at int64) (bool, error) {
+	return a.DB.RestartDelayedEvent(ctx, delayID, at)
+}
+
+func (a *UserInternalAPI) DeleteDelayedStateEvents(ctx context.Context, roomID, eventType, stateKey string) ([]string, error) {
+	return a.DB.DeleteDelayedStateEvents(ctx, roomID, eventType, stateKey)
+}
+
+func (a *UserInternalAPI) CountDelayedEvents(ctx context.Context, userID string) (int, error) {
+	return a.DB.CountDelayedEvents(ctx, userID)
+}

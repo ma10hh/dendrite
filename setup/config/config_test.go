@@ -441,3 +441,33 @@ func TestMessageRetentionVerify(t *testing.T) {
 		})
 	}
 }
+
+func TestDelayedEventsAndRTCVerify(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		verify  func(*ConfigErrors)
+		wantErr bool
+	}{
+		{"delayed events off ignores the rest", func(e *ConfigErrors) { (&DelayedEvents{MaxDelay: -1}).Verify(e) }, false},
+		{"delayed events on", func(e *ConfigErrors) { (&DelayedEvents{Enabled: true, MaxDelay: time.Hour, MaxPerUser: 5}).Verify(e) }, false},
+		{"delayed events without a maximum", func(e *ConfigErrors) { (&DelayedEvents{Enabled: true, MaxPerUser: 5}).Verify(e) }, true},
+		{"delayed events without a limit per user", func(e *ConfigErrors) { (&DelayedEvents{Enabled: true, MaxDelay: time.Hour}).Verify(e) }, true},
+		{"livekit", func(e *ConfigErrors) {
+			(&MatrixRTC{Transports: []RTCTransport{{Type: "livekit", LiveKitServiceURL: "https://lk.example.org"}}}).Verify(e)
+		}, false},
+		{"unknown transport", func(e *ConfigErrors) {
+			(&MatrixRTC{Transports: []RTCTransport{{Type: "jitsi", LiveKitServiceURL: "https://lk.example.org"}}}).Verify(e)
+		}, true},
+		{"not a URL", func(e *ConfigErrors) {
+			(&MatrixRTC{Transports: []RTCTransport{{Type: "livekit", LiveKitServiceURL: "lk.example.org"}}}).Verify(e)
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs ConfigErrors
+			tc.verify(&errs)
+			if (len(errs) > 0) != tc.wantErr {
+				t.Errorf("errors = %v, want error: %v", errs, tc.wantErr)
+			}
+		})
+	}
+}

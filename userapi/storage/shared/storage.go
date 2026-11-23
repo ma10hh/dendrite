@@ -42,6 +42,7 @@ type Database struct {
 	AccountDatas          tables.AccountDataTable
 	ThreePIDs             tables.ThreePIDTable
 	Restrictions          tables.AccountRestrictionsTable
+	DelayedEvents         tables.DelayedEventsTable
 	OpenIDTokens          tables.OpenIDTable
 	KeyBackups            tables.KeyBackupTable
 	KeyBackupVersions     tables.KeyBackupVersionTable
