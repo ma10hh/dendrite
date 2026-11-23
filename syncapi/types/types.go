@@ -744,3 +744,11 @@ type RelationBundles struct {
 	// References has the events that reference each event, oldest first.
 	References map[string][]RelationChild
 }
+
+// SenderEvent is an event in the timeline that a user sent, as the admin API lists them.
+type SenderEvent struct {
+	// Position is the stream position of the event, to continue a listing after it.
+	Position int64
+	EventID  string
+	RoomID   string
+}

@@ -112,7 +112,8 @@ const selectSearchSQL = "SELECT id, event_id, headered_event_json FROM syncapi_o
 
 const selectRetentionCandidatesSQL = "" +
 	"SELECT event_id FROM syncapi_output_room_events WHERE room_id = $1 AND origin_server_ts > 0 AND origin_server_ts < $2 AND is_state = FALSE" +
-	" ORDER BY origin_server_ts ASC, id ASC LIMIT $3"
+	" AND ($3 = '' OR sender NOT LIKE $3 ESCAPE '\\')" +
+	" ORDER BY origin_server_ts ASC, id ASC LIMIT $4"
 
 const deleteEventSQL = "" +
 	"DELETE FROM syncapi_output_room_events WHERE event_id = $1"
@@ -777,8 +778,8 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 	return result, nil
 }
 
-func (s *outputRoomEventsStatements) SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error) {
-	rows, err := sqlutil.TxStmt(txn, s.selectRetentionCandidatesStmt).QueryContext(ctx, roomID, before, limit)
+func (s *outputRoomEventsStatements) SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int, keepSenderLike string) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectRetentionCandidatesStmt).QueryContext(ctx, roomID, before, keepSenderLike, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -806,4 +807,32 @@ func (s *outputRoomEventsStatements) SelectEventAtTimestamp(ctx context.Context,
 	}
 	err = sqlutil.TxStmt(txn, stmt).QueryRowContext(ctx, roomID, ts).Scan(&eventID, &originServerTS)
 	return
+}
+
+const selectEventsBySenderSQL = "" +
+	"SELECT id, event_id, room_id FROM syncapi_output_room_events WHERE sender = $1 AND id > $2 AND is_state = FALSE" +
+	" AND type <> 'm.room.redaction' ORDER BY id ASC LIMIT $3"
+
+func (s *outputRoomEventsStatements) SelectEventsBySender(ctx context.Context, txn *sql.Tx, sender string, afterID int64, limit int) ([]types.SenderEvent, error) {
+	// Not prepared once: it is for an administrator, who asks rarely.
+	var q interface {
+		QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+	} = s.db
+	if txn != nil {
+		q = txn
+	}
+	rows, err := q.QueryContext(ctx, selectEventsBySenderSQL, sender, afterID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectEventsBySender: rows.close() failed")
+	var out []types.SenderEvent
+	for rows.Next() {
+		var e types.SenderEvent
+		if err = rows.Scan(&e.Position, &e.EventID, &e.RoomID); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
 }

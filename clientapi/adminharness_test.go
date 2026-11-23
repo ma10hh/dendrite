@@ -17,6 +17,8 @@ import (
 	rsapi "github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/setup/config"
 	"github.com/element-hq/dendrite/setup/jetstream"
+	"github.com/element-hq/dendrite/setup/process"
+	"github.com/element-hq/dendrite/syncapi"
 	"github.com/element-hq/dendrite/test"
 	"github.com/element-hq/dendrite/test/testrig"
 	"github.com/element-hq/dendrite/userapi"
@@ -25,13 +27,17 @@ import (
 
 // adminHarness is a client API with a real roomserver and user API, and signed-in users.
 type adminHarness struct {
-	t       *testing.T
-	ctx     context.Context
-	cfg     *config.Dendrite
-	routers httputil.Routers
-	rsAPI   rsapi.RoomserverInternalAPI
-	userAPI uapi.UserInternalAPI
-	tokens  map[*test.User]userDevice
+	processCtx *process.ProcessContext
+	nats       *jetstream.NATSInstance
+	cm         *sqlutil.Connections
+	caches     *caching.Caches
+	t          *testing.T
+	ctx        context.Context
+	cfg        *config.Dendrite
+	routers    httputil.Routers
+	rsAPI      rsapi.RoomserverInternalAPI
+	userAPI    uapi.UserInternalAPI
+	tokens     map[*test.User]userDevice
 }
 
 // newAdminHarness starts it. Change the configuration in tune, which runs before the routes are set up.
@@ -49,12 +55,18 @@ func newAdminHarness(t *testing.T, dbType test.DBType, tune func(*config.Dendrit
 	rsAPI.SetFederationAPI(nil, nil)
 	userAPI := userapi.NewInternalAPI(processCtx, cfg, cm, &natsInstance, rsAPI, nil, caching.DisableMetrics, testIsBlacklistedOrBackingOff)
 	AddPublicRoutes(processCtx, routers, cfg, &natsInstance, nil, rsAPI, nil, transactions.New(), nil, userAPI, nil, nil, caching.DisableMetrics)
-	h := &adminHarness{t: t, ctx: context.Background(), cfg: cfg, routers: routers, rsAPI: rsAPI, userAPI: userAPI, tokens: map[*test.User]userDevice{}}
+	h := &adminHarness{t: t, processCtx: processCtx, nats: &natsInstance, cm: cm, caches: caches, ctx: context.Background(), cfg: cfg, routers: routers, rsAPI: rsAPI, userAPI: userAPI, tokens: map[*test.User]userDevice{}}
 	for _, u := range users {
 		h.tokens[u] = userDevice{}
 	}
 	createAccessTokens(t, h.tokens, userAPI, h.ctx, routers)
 	return h, closeFn
+}
+
+// startSyncAPI starts the sync API, which holds the timeline that purge_history and redact work on.
+func (h *adminHarness) startSyncAPI() {
+	h.t.Helper()
+	syncapi.AddPublicRoutes(h.processCtx, h.routers, h.cfg, h.cm, h.nats, h.userAPI, h.rsAPI, h.caches, caching.DisableMetrics)
 }
 
 // call makes a request as the user, with a JSON body if there is one.

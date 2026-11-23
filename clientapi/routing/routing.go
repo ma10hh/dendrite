@@ -316,6 +316,32 @@ func Setup(
 			}),
 		).Methods(http.MethodPost, http.MethodOptions)
 	}
+	adminJobStore := newAdminJobs()
+	synapseAdminRouter.Handle("/admin/v1/purge_history/{roomId}",
+		httputil.MakeAdminAPI("synapse_admin_purge_history", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminPurgeHistory(req, rsAPI, adminJobStore)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/purge_history/{roomId}/{eventId}",
+		httputil.MakeAdminAPI("synapse_admin_purge_history_event", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminPurgeHistory(req, rsAPI, adminJobStore)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/purge_history_status/{purgeId}",
+		httputil.MakeAdminAPI("synapse_admin_purge_history_status", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminPurgeHistoryStatus(req, adminJobStore)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/user/{userId}/redact",
+		httputil.MakeAdminAPI("synapse_admin_redact_user", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRedactUser(req, device, cfg, rsAPI, adminJobStore)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/user/redact_status/{redactId}",
+		httputil.MakeAdminAPI("synapse_admin_redact_status", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRedactStatus(req, adminJobStore)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
 	synapseAdminRouter.Handle("/admin/v1/users/{userId}/joined_rooms",
 		httputil.MakeAdminAPI("synapse_admin_joined_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return SynapseAdminJoinedRooms(req, cfg, userAPI, rsAPI)

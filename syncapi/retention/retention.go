@@ -101,10 +101,19 @@ func runRoom(
 	if max <= 0 {
 		return 0, nil
 	}
-	before := now.Add(-max).UnixMilli()
+	return PurgeRoomBefore(ctx, db, rs, fts, roomID, now.Add(-max).UnixMilli(), "")
+}
+
+// PurgeRoomBefore deletes the non-state events of the room that were sent before the time (milliseconds), in batches:
+// the roomserver strips them first and the sync API and the search index forget them afterwards. Events of senders that
+// match keepSenderLike (a LIKE pattern, backslash is the escape) are kept. It says how many it deleted.
+func PurgeRoomBefore(
+	ctx context.Context, db storage.Database, rs Pruner, fts *fulltext.Search,
+	roomID string, before int64, keepSenderLike string,
+) (int, error) {
 	total := 0
 	for ctx.Err() == nil {
-		ids, err := db.RetentionCandidates(ctx, roomID, before, batchSize)
+		ids, err := db.RetentionCandidates(ctx, roomID, before, batchSize, keepSenderLike)
 		if err != nil {
 			return total, err
 		}

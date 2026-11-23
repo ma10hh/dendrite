@@ -861,8 +861,12 @@ func (d *Database) RoomIDsWithStateType(ctx context.Context, evType string) ([]s
 	return d.CurrentRoomState.SelectRoomIDsWithType(ctx, nil, evType)
 }
 
-func (d *Database) RetentionCandidates(ctx context.Context, roomID string, before int64, limit int) ([]string, error) {
-	return d.OutputEvents.SelectRetentionCandidates(ctx, nil, roomID, before, limit)
+func (d *Database) RetentionCandidates(ctx context.Context, roomID string, before int64, limit int, keepSenderLike string) ([]string, error) {
+	return d.OutputEvents.SelectRetentionCandidates(ctx, nil, roomID, before, limit, keepSenderLike)
+}
+
+func (d *Database) EventsBySender(ctx context.Context, sender string, afterID int64, limit int) ([]types.SenderEvent, error) {
+	return d.OutputEvents.SelectEventsBySender(ctx, nil, sender, afterID, limit)
 }
 
 func (d *Database) DeleteEvents(ctx context.Context, roomID string, eventIDs []string) error {

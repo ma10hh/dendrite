@@ -63,6 +63,7 @@ type RoomserverInternalAPI struct {
 	InputRoomEventTopic    string // JetStream topic for new input room events
 	OutputProducer         *producers.RoomEventProducer
 	eventAtTimestamp       atomic.Pointer[api.EventAtTimestamp]
+	syncAdmin              atomic.Pointer[api.SyncAdmin]
 	PerspectiveServerNames []spec.ServerName
 	enableMetrics          bool
 	defaultRoomVersion     gomatrixserverlib.RoomVersion
@@ -404,4 +405,17 @@ func (r *RoomserverInternalAPI) QueryEventAtTimestamp(ctx context.Context, roomI
 		return "", 0, api.ErrNoEventAtTimestamp
 	}
 	return (*f)(ctx, roomID, ts, forward)
+}
+
+// SetSyncAdmin registers what the admin API asks of the sync API.
+func (r *RoomserverInternalAPI) SetSyncAdmin(a api.SyncAdmin) {
+	r.syncAdmin.Store(&a)
+}
+
+// SyncAdmin returns what the sync API offers to the admin API, or nil if it is not running.
+func (r *RoomserverInternalAPI) SyncAdmin() api.SyncAdmin {
+	if a := r.syncAdmin.Load(); a != nil {
+		return *a
+	}
+	return nil
 }

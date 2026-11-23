@@ -1855,3 +1855,5 @@ func TestKnockOnRoomOfOtherServer(t *testing.T) {
 }
 
 func (s *syncRoomserverAPI) SetEventAtTimestamp(rsapi.EventAtTimestamp) {}
+
+func (s *syncRoomserverAPI) SetSyncAdmin(rsapi.SyncAdmin) {}

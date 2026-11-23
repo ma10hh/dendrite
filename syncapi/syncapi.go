@@ -162,6 +162,7 @@ func AddPublicRoutes(
 	})
 
 	internal.SetRetention(&dendriteCfg.SyncAPI.Retention)
+	rsAPI.SetSyncAdmin(&syncAdmin{db: syncDB, rsAPI: rsAPI, fts: fts, serverName: dendriteCfg.Global.ServerName})
 	retention.Start(processContext.Context(), &dendriteCfg.SyncAPI.Retention, syncDB, rsAPI, fts)
 
 	rateLimits := httputil.NewRateLimits(&dendriteCfg.ClientAPI.RateLimiting)

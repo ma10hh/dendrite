@@ -69,9 +69,13 @@ type Events interface {
 	UpdateEventJSON(ctx context.Context, txn *sql.Tx, event *rstypes.HeaderedEvent) error
 	// DeleteEventsForRoom removes all event information for a room. This should only be done when removing the room entirely.
 	DeleteEventsForRoom(ctx context.Context, txn *sql.Tx, roomID string) (err error)
-	// SelectRetentionCandidates returns up to limit non-state events of the room that were sent before the time (milliseconds), oldest first.
+	// SelectRetentionCandidates returns up to limit non-state events of the room that were sent before the time (milliseconds), oldest first,
+	// except those whose sender matches the LIKE pattern (escaped with a backslash; "" keeps nothing).
 	// Events without a known time are never returned.
-	SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error)
+	SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int, keepSenderLike string) ([]string, error)
+	// SelectEventsBySender returns up to limit events that the user sent, after the stream position, oldest first. State
+	// events and redactions are not listed.
+	SelectEventsBySender(ctx context.Context, txn *sql.Tx, sender string, afterID int64, limit int) ([]types.SenderEvent, error)
 	// DeleteEvent removes one event.
 	DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error
 	// SelectEventAtTimestamp returns the event of the room that is closest to the time (milliseconds), at or after it if

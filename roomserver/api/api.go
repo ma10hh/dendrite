@@ -170,6 +170,8 @@ type QueryMembershipAPI interface {
 
 // API functions required by the syncapi
 type SyncRoomserverAPI interface {
+	// SetSyncAdmin registers what the admin API asks of the sync API.
+	SetSyncAdmin(a SyncAdmin)
 	// SetEventAtTimestamp registers the look-up that answers QueryEventAtTimestamp.
 	SetEventAtTimestamp(f EventAtTimestamp)
 	// PerformAdminPruneEvents strips the content of the events of the room that are not state events and returns how many it changed.
@@ -227,6 +229,8 @@ type AppserviceRoomserverAPI interface {
 }
 
 type ClientRoomserverAPI interface {
+	// SyncAdmin is what the sync API offers to the admin API, or nil if it is not running.
+	SyncAdmin() SyncAdmin
 	InputRoomEventsAPI
 	QueryLatestEventsAndStateAPI
 	QueryBulkStateContentAPI
@@ -364,3 +368,24 @@ var ErrNoEventAtTimestamp = errors.New("no event at that time")
 // otherwise at or before it. It returns ErrNoEventAtTimestamp if there is none. The sync API, which has the timeline of
 // rooms with the times of their events, provides it.
 type EventAtTimestamp func(ctx context.Context, roomID string, ts int64, forward bool) (eventID string, originServerTS int64, err error)
+
+// SyncAdmin is what the sync API, which holds the timeline of the rooms, offers to the admin API of the client API.
+type SyncAdmin interface {
+	// PurgeHistory deletes the non-state events of the room that were sent before the time (milliseconds), and says how
+	// many. The events of users of this server are kept unless deleteLocal is set.
+	PurgeHistory(ctx context.Context, roomID string, beforeTS int64, deleteLocal bool) (int, error)
+	// EventTimestamp says when the event of the room was sent (milliseconds), or returns ErrSyncAdminNotFound.
+	EventTimestamp(ctx context.Context, roomID, eventID string) (int64, error)
+	// EventsBySender lists up to limit non-state events of the user after the position, oldest first.
+	EventsBySender(ctx context.Context, userID string, afterPosition int64, limit int) ([]SyncAdminEvent, error)
+}
+
+// SyncAdminEvent is an event in the timeline that a user sent.
+type SyncAdminEvent struct {
+	Position int64
+	EventID  string
+	RoomID   string
+}
+
+// ErrSyncAdminNotFound is returned when the event is not in the timeline of the room.
+var ErrSyncAdminNotFound = errors.New("not found in the timeline")

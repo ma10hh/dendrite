@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/matrix-org/gomatrixserverlib"
+	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/element-hq/dendrite/internal/sqlutil"
@@ -164,5 +165,55 @@ func TestRunKeepsMessagesWhenTheRoomserverFails(t *testing.T) {
 		assert.NoError(t, err, "a failing room is logged and the run goes on")
 		assert.Equal(t, 0, n)
 		assert.True(t, remaining(t, db, room.ID)[old.EventID()], "the sync API keeps what the roomserver did not prune, so the next run finds it again")
+	})
+}
+
+func TestPurgeRoomBeforeKeepsSenders(t *testing.T) {
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		db, closeDB := mustCreateDatabase(t, dbType)
+		defer closeDB()
+		ctx := context.Background()
+
+		now := time.Now()
+		alice := test.NewUser(t)
+		remote := test.NewUser(t, test.WithSigningServer("other.example", "ed25519:abc", test.PrivateKeyB))
+		room := test.NewRoom(t, alice)
+		room.CreateAndInsert(t, remote, "m.room.member", map[string]any{"membership": "join"}, test.WithStateKey(remote.ID))
+		localOld := room.CreateAndInsert(t, alice, "m.room.message", map[string]any{"body": "local"}, test.WithTimestamp(now.Add(-48*time.Hour)))
+		remoteOld := room.CreateAndInsert(t, remote, "m.room.message", map[string]any{"body": "remote"}, test.WithTimestamp(now.Add(-48*time.Hour)))
+		for _, ev := range room.Events() {
+			sender, err := spec.NewUserID(string(ev.SenderID()), true)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ev.UserID = *sender
+		}
+		writeEvents(t, db, room.Events())
+
+		// What the user sent, state events and redactions left out, oldest first.
+		mine, err := db.EventsBySender(ctx, alice.ID, 0, 10)
+		assert.NoError(t, err)
+		if assert.Len(t, mine, 1) {
+			assert.Equal(t, localOld.EventID(), mine[0].EventID)
+			assert.Equal(t, room.ID, mine[0].RoomID)
+		}
+		more, err := db.EventsBySender(ctx, alice.ID, mine[0].Position, 10)
+		assert.NoError(t, err)
+		assert.Empty(t, more, "listing continues after a position")
+
+		// Keep the senders of this server, as the purge does without delete_local_events.
+		pruner := &fakePruner{}
+		n, err := retention.PurgeRoomBefore(ctx, db, pruner, nil, room.ID, now.UnixMilli(), "%:test")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, n)
+		assert.Equal(t, []string{remoteOld.EventID()}, pruner.pruned[room.ID])
+		got := remaining(t, db, room.ID)
+		assert.True(t, got[localOld.EventID()])
+		assert.False(t, got[remoteOld.EventID()])
+
+		n, err = retention.PurgeRoomBefore(ctx, db, pruner, nil, room.ID, now.UnixMilli(), "")
+		assert.NoError(t, err)
+		assert.Equal(t, 1, n, "without a sender to keep the local one goes too")
+		assert.False(t, remaining(t, db, room.ID)[localOld.EventID()])
 	})
 }
