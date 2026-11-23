@@ -73,6 +73,10 @@ Indexing is done in the background, the server logs every 1000 events (or below)
 
 This endpoint instructs Dendrite to immediately query `/devices/{userID}` on a federated server. An empty JSON body will be returned on success, updating all locally stored user devices/keys. This can be used to possibly resolve E2EE issues, where the remote user can't decrypt messages.
 
+## GET `/_dendrite/admin/serverACL/{roomID}`
+
+Shows the server ACL that the room has now: `acl` is the content of its `m.room.server_acl` state event (`null` if it has none) and `event_id` the event. With `?server=name`, `server.banned` says whether this server would refuse `name` in that room because of it (federation requests of that server are answered with 403). Read-only; the ACL itself is changed by sending the state event in the room.
+
 ## POST `/_dendrite/admin/purgeRoom/{roomID}`
 
 This endpoint instructs Dendrite to remove the given room from its database. It does **NOT** remove media files. Depending on the size of the room, this may take a while. Will return an empty JSON once other components were instructed to delete the room.

@@ -94,6 +94,9 @@ func Setup(
 
 	unstableFeatures := unstableFeatures(cfg.MSCs.MSCs)
 
+	if len(cfg.MatrixRTC.Transports) > 0 {
+		unstableFeatures["org.matrix.msc4143"] = true
+	}
 	var delayed *delayedEvents
 	if cfg.DelayedEvents.Enabled {
 		delayed = NewDelayedEvents(cfg, userAPI, rsAPI)
@@ -247,6 +250,55 @@ func Setup(
 			return SynapseAdminUserByThreePID(req, userAPI)
 		}),
 	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/admin",
+		httputil.MakeAdminAPI("synapse_admin_user_admin", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminUserAdmin(req, device, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodPut, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/pushers",
+		httputil.MakeAdminAPI("synapse_admin_pushers", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminPushers(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/accountdata",
+		httputil.MakeAdminAPI("synapse_admin_accountdata", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminAccountData(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/whois/{userId}",
+		httputil.MakeAdminAPI("synapse_admin_whois", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			vars, err := httputil.URLDecodeMapValues(mux.Vars(req))
+			if err != nil {
+				return util.ErrorResponse(err)
+			}
+			return GetAdminWhois(req, userAPI, device, vars["userId"])
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/username_available",
+		httputil.MakeAdminAPI("synapse_admin_username_available", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminUsernameAvailable(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/background_updates/status",
+		httputil.MakeAdminAPI("synapse_admin_background_updates", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminBackgroundUpdates(req)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/background_updates/enabled",
+		httputil.MakeAdminAPI("synapse_admin_background_updates_enabled", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminBackgroundUpdates(req)
+		}),
+	).Methods(http.MethodGet, http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/experimental_features/{userId}",
+		httputil.MakeAdminAPI("synapse_admin_experimental_features", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminExperimentalFeatures(req)
+		}),
+	).Methods(http.MethodGet, http.MethodPut, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/scheduled_tasks",
+		httputil.MakeAdminAPI("synapse_admin_scheduled_tasks", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminScheduledTasks(req)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
 	synapseAdminRouter.Handle("/admin/v1/users/{userId}/joined_rooms",
 		httputil.MakeAdminAPI("synapse_admin_joined_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return SynapseAdminJoinedRooms(req, cfg, userAPI, rsAPI)
@@ -360,6 +412,12 @@ func Setup(
 			}
 		}),
 	).Methods(http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodOptions)
+
+	dendriteAdminRouter.Handle("/admin/serverACL/{roomID}",
+		httputil.MakeAdminAPI("admin_server_acl", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return AdminServerACL(req, rsAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
 
 	dendriteAdminRouter.Handle("/admin/evacuateRoom/{roomID}",
 		httputil.MakeAdminAPI("admin_evacuate_room", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
@@ -1794,6 +1852,8 @@ func unstableFeatures(enabledMSCs []string) map[string]bool {
 		"org.matrix.msc4222": true,
 		// GET /rooms/{roomId}/timestamp_to_event finds the event closest to a time (MSC3030, stable since v1.6).
 		"org.matrix.msc3030": true,
+		// The room summary API of MSC3266, served at /room_summary and the unstable im.nheko.summary paths.
+		"org.matrix.msc3266": true,
 	}
 	for _, msc := range enabledMSCs {
 		features["org.matrix."+msc] = true

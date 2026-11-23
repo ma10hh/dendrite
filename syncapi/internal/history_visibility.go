@@ -107,6 +107,13 @@ func ApplyHistoryVisibilityFilter(
 	if len(events) == 0 {
 		return events, nil
 	}
+	events, err := hideExpiredEvents(ctx, syncDB, events, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return events, nil
+	}
 	start := time.Now()
 
 	// try to get the current membership of the user

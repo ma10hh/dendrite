@@ -14,6 +14,7 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/getsentry/sentry-go"
@@ -132,8 +133,37 @@ func MakeAdminAPI(
 				JSON: spec.Forbidden("This API can only be used by admin users."),
 			}
 		}
-		return f(req, device)
+		res := f(req, device)
+		auditAdminCall(req, device, metricsName, res.Code)
+		return res
 	})
+}
+
+// adminRequests counts the calls of the admin APIs by handler and status code.
+var adminRequests = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Namespace: "dendrite",
+		Subsystem: "admin",
+		Name:      "requests_total",
+		Help:      "Calls of the admin APIs, by handler and status code",
+	},
+	[]string{"handler", "code"},
+)
+
+// auditAdminCall leaves a record of what an administrator did: who, which call and how it ended. The query string
+// and the body are not logged, since they can hold passwords and tokens.
+func auditAdminCall(req *http.Request, device *userapi.Device, handler string, code int) {
+	adminRequests.WithLabelValues(handler, strconv.Itoa(code)).Inc()
+	logrus.WithFields(logrus.Fields{
+		"audit":   "admin",
+		"admin":   device.UserID,
+		"device":  device.ID,
+		"method":  req.Method,
+		"path":    req.URL.Path,
+		"handler": handler,
+		"code":    code,
+		"remote":  req.RemoteAddr,
+	}).Info("Admin API call")
 }
 
 // requestDuration is how long the handlers take, by handler and status code.

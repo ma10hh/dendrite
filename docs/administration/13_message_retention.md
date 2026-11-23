@@ -44,6 +44,10 @@ A room sets its policy with the state event `m.room.retention` (state key `""`) 
 - The run asks the roomserver first and deletes from the sync API afterwards, so a crash in between leaves the messages to be found again by the next run.
 - Deleted messages are removed from the search index.
 
+## Hiding before the deletion
+
+The deletion runs every `interval`, but messages are **hidden as soon as they are over their `max_lifetime`**: the history filter that `/sync`, sliding sync, `/messages`, `/context`, `/event`, relations and threads already go through drops them, using the policy of the room (or the default and the limits of the server) at the time of the request. Only `/search` and the federation API (backfill, `/event`) can still return them until the next run. State events are never hidden.
+
 ## What is not deleted
 
 - **Media.** Files attached to deleted messages stay; use the [media retention](9_media.md) for them.
@@ -54,7 +58,6 @@ A room sets its policy with the state event `m.room.retention` (state key `""`) 
 ## Differences from Synapse
 
 - No separate `purge_jobs` per room size and no `/_synapse/admin/v1/purge_history`.
-- Messages that are over their `max_lifetime` stay visible until the next run (`interval`); Synapse hides them at once.
 - Rooms of other servers are treated alike: this server deletes its copy by its own limits.
 
 ## Metrics and logs

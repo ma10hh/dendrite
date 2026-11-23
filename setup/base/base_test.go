@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"errors"
 	"html/template"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path"
+	"strings"
 	"testing"
 	"time"
 
@@ -105,4 +107,37 @@ func TestLandingPage_UnixSocket(t *testing.T) {
 
 	// Using .String() for user friendly output
 	assert.Equal(t, expectedRes.String(), buf.String(), "response mismatch")
+}
+
+func TestMonitorReady(t *testing.T) {
+	processCtx := process.NewProcessContext()
+	routers := httputil.NewRouters()
+	basepkg.ConfigureAdminEndpoints(processCtx, routers)
+	get := func() (int, string) {
+		rec := httptest.NewRecorder()
+		routers.DendriteAdmin.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/_dendrite/monitor/ready", nil))
+		return rec.Code, rec.Body.String()
+	}
+	if code, _ := get(); code != http.StatusOK {
+		t.Fatalf("nothing registered: got %d, want 200", code)
+	}
+	failing := true
+	processCtx.RegisterReadiness("database 1 (postgres)", func(context.Context) error {
+		if failing {
+			return errors.New("connection refused")
+		}
+		return nil
+	})
+	code, body := get()
+	if code != http.StatusServiceUnavailable || !strings.Contains(body, "database 1 (postgres): connection refused") {
+		t.Errorf("failing check: got %d %s", code, body)
+	}
+	failing = false
+	if code, _ = get(); code != http.StatusOK {
+		t.Errorf("recovered: got %d, want 200", code)
+	}
+	processCtx.Degraded(errors.New("NATS is away"))
+	if code, body = get(); code != http.StatusServiceUnavailable || !strings.Contains(body, "NATS is away") {
+		t.Errorf("degraded: got %d %s", code, body)
+	}
 }

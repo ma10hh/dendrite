@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/element-hq/dendrite/setup/config"
 	"github.com/element-hq/dendrite/setup/process"
@@ -19,6 +20,7 @@ type Connections struct {
 	globalConfig        config.DatabaseOptions
 	processContext      *process.ProcessContext
 	existingConnections sync.Map
+	databases           atomic.Int32 // numbers the databases for the readiness check
 }
 
 type con struct {
@@ -63,6 +65,9 @@ func (c *Connections) Connection(dbProperties *config.DatabaseOptions) (*sql.DB,
 	}
 	c.existingConnections.Store(dbProperties.ConnectionString, &con{db: db, writer: writer})
 	registerDBStats(db, dbProperties.ConnectionString)
+	if c.processContext != nil {
+		c.processContext.RegisterReadiness(fmt.Sprintf("database %d (%s)", c.databases.Add(1), databaseKind(dbProperties.ConnectionString)), db.PingContext)
+	}
 	go func() {
 		if c.processContext == nil {
 			return
@@ -76,4 +81,12 @@ func (c *Connections) Connection(dbProperties *config.DatabaseOptions) (*sql.DB,
 	}()
 	return db, writer, nil
 
+}
+
+// databaseKind names the kind of database for messages, without the connection string, which can hold a password.
+func databaseKind(ds config.DataSource) string {
+	if ds.IsSQLite() {
+		return "sqlite"
+	}
+	return "postgres"
 }

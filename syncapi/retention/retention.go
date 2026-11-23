@@ -21,6 +21,13 @@ import (
 	"github.com/element-hq/dendrite/syncapi/storage"
 )
 
+var lastRun = promauto.NewGauge(prometheus.GaugeOpts{
+	Namespace: "dendrite",
+	Subsystem: "syncapi",
+	Name:      "retention_last_run_timestamp_seconds",
+	Help:      "When the last run of the deletion of old messages finished, as a Unix time; 0 until the first run",
+})
+
 var deletedTotal = promauto.NewCounter(prometheus.CounterOpts{
 	Namespace: "dendrite",
 	Subsystem: "syncapi",
@@ -64,6 +71,7 @@ func Run(
 			log.WithError(err).WithField("room_id", roomID).Warn("Deleting old messages of a room failed")
 		}
 	}
+	lastRun.Set(float64(time.Now().Unix()))
 	return total, nil
 }
 

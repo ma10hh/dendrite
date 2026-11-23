@@ -97,6 +97,24 @@ func ConfigureAdminEndpoints(processContext *process.ProcessContext, routers htt
 	routers.DendriteAdmin.HandleFunc("/monitor/up", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(200)
 	})
+	// Ready means the process can do its work: nothing is degraded and every database answers. Unlike /monitor/health it
+	// asks the databases, so a load balancer or an orchestrator can hold traffic back while they are away.
+	routers.DendriteAdmin.HandleFunc("/monitor/ready", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		failures := processContext.Readiness(ctx)
+		if isDegraded, reasons := processContext.IsDegraded(); isDegraded {
+			failures = append(failures, reasons...)
+		}
+		if len(failures) > 0 {
+			w.WriteHeader(503)
+			_ = json.NewEncoder(w).Encode(struct {
+				Failures []string `json:"failures"`
+			}{failures})
+			return
+		}
+		w.WriteHeader(200)
+	})
 	routers.DendriteAdmin.HandleFunc("/monitor/health", func(w http.ResponseWriter, r *http.Request) {
 		if isDegraded, reasons := processContext.IsDegraded(); isDegraded {
 			w.WriteHeader(503)

@@ -40,6 +40,7 @@ func setupSynapseAdmin(
 	handle("/admin/v1/user/{userId}/media/quarantine", "synapse_admin_quarantine_user", media.quarantineUser, http.MethodPost)
 	handle("/admin/v1/media/{server}/{mediaId}", "synapse_admin_delete_media", media.deleteOne, http.MethodDelete)
 	handle("/admin/v1/media/{server}/delete", "synapse_admin_delete_old_media", media.deleteOld, http.MethodPost)
+	handle("/admin/v1/purge_media_cache", "synapse_admin_purge_media_cache", media.purgeCache, http.MethodPost)
 	handle("/admin/v1/statistics/users/media", "synapse_admin_user_media_statistics", media.userStatistics, http.MethodGet)
 	handle("/admin/v1/users/{userId}/media", "synapse_admin_user_media", func(r *http.Request) util.JSONResponse {
 		if r.Method == http.MethodDelete {
@@ -303,4 +304,36 @@ func (a *mediaAdmin) userStatistics(req *http.Request) util.JSONResponse {
 		body["next_token"] = next
 	}
 	return util.JSONResponse{Code: http.StatusOK, JSON: body}
+}
+
+// purgeCache implements POST /_synapse/admin/v1/purge_media_cache?before_ts=: it deletes the copies of media of other
+// servers that were last used before the time. They are fetched again when somebody asks for them. Quarantined media
+// stays, as in the retention.
+func (a *mediaAdmin) purgeCache(req *http.Request) util.JSONResponse {
+	before, err := strconv.ParseInt(req.URL.Query().Get("before_ts"), 10, 64)
+	if err != nil || before < 0 {
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.MissingParam("before_ts must be a time in milliseconds")}
+	}
+	deleted := 0
+	for req.Context().Err() == nil {
+		batch, err := a.db.UnusedMedia(req.Context(), false, a.cfg.Matrix.ServerName, spec.Timestamp(before), retentionBatch)
+		if err != nil {
+			util.GetLogger(req.Context()).WithError(err).Error("UnusedMedia failed")
+			return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, m := range batch {
+			ok, err := removeMedia(req.Context(), a.cfg, a.db, m.MediaID, m.Origin)
+			if err != nil {
+				util.GetLogger(req.Context()).WithError(err).WithField("media_id", m.MediaID).Error("deleting media failed")
+				return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+			}
+			if ok {
+				deleted++
+			}
+		}
+	}
+	return util.JSONResponse{Code: http.StatusOK, JSON: map[string]int{"deleted": deleted}}
 }

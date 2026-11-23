@@ -49,7 +49,7 @@ Element X and an administrator of a small server need. Everything new that chang
 | Media: quota per user, deletion of media nobody downloaded | No | Yes | Off (`media_api.max_user_storage_bytes`, `media_api.retention`) |
 | Message retention policies (`m.room.retention`, MSC1763): old messages are deleted | No | Yes | Off (`sync_api.retention.enabled`) |
 | Delayed events (MSC4140) and the address of a media server for calls (MSC4143), what Element Call needs from a homeserver | No | Yes, no media server | Off (`client_api.delayed_events`, `client_api.matrix_rtc`) |
-| Metrics | A few | Also the duration of every request, the database pools and the new features | With `global.metrics.enabled` |
+| Metrics, health | A few | Also the duration of every request, the database pools and the new features; a readiness check (`/_dendrite/monitor/ready`); an audit log of admin calls | Metrics with `global.metrics.enabled`, the rest always |
 | Joining big rooms without their member list (MSC3706) | No | Experimental, **do not enable** | Off (`federation_api.partial_state_joins`) |
 | Configuration check | Unknown and repeated keys are ignored | **Refused at startup**, with their line numbers | On |
 | Remote crash through an event whose room ID is `!:` (found by fuzzing) | Same code paths, not tested | Fixed | Fixed |

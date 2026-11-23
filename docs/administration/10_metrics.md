@@ -31,11 +31,20 @@ With `global.metrics.enabled: true` Dendrite serves Prometheus metrics at `/metr
 | `dendrite_mediaapi_download*`, `dendrite_mediaapi_thumbnail*` | counter, histogram | Media requests and sizes |
 | `dendrite_mediaapi_retention_deleted_total{kind}` | counter | Media deleted by the retention, `local` or `remote` |
 | `dendrite_mediaapi_uploads_over_quota_total` | counter | Uploads refused because the user is out of storage |
+| `dendrite_admin_requests_total{handler,code}` | counter | Calls of the admin APIs (`/_dendrite/admin`, `/_synapse/admin`), by handler and status code |
+| `dendrite_syncapi_retention_deleted_total` | counter | Messages deleted by [message retention](13_message_retention.md) |
+| `dendrite_syncapi_retention_last_run_timestamp_seconds` | gauge | When the last run of that deletion finished (Unix time, 0 before the first). Alert when it stops moving for much more than `sync_api.retention.interval` |
 | `dendrite_delegated_auth_introspections_total{result}` | counter | Tokens checked with the provider (MAS): `cache_hit`, `active`, `inactive`, `error`. `error` means the provider could not be asked, and the users get errors with it |
 | `go_sql_*{db_name}` | gauge, counter | The connection pool of each database: open, idle and in use connections, and the time requests waited for one. `db_name` is the host and database, or the SQLite file, never the credentials |
 | `dendrite_caching_ristretto_ratio`, `..._cost` | gauge | Hit ratio and size of the caches |
 
 Useful alerts to start with: the error rate of `dendrite_http_request_duration_seconds` by `code=~"5.."`, the 99th percentile of the same for `handler="send_message"` and `handler="sync"`, `dendrite_roomserver_input_backpressure` above zero for minutes, `go_sql_wait_duration_seconds_total` rising, and `dendrite_delegated_auth_introspections_total{result="error"}`.
+
+## Health checks and the audit log
+
+- `GET /_dendrite/monitor/up` answers 200 as long as the process runs. `GET /_dendrite/monitor/health` answers 503 with the reasons while the server is degraded (for example, NATS is not reachable).
+- `GET /_dendrite/monitor/ready` answers 200 only if the server is not degraded **and every database answers a ping** (3 seconds at most); otherwise 503 with `{"failures": ["database 1 (postgres): ...", ...]}`. Use it for a load balancer or an orchestrator readiness probe. These endpoints need no login, so do not expose them to the internet.
+- **Audit log:** every call of an admin API is logged at info level with `audit=admin`, the administrator (`admin`, `device`), `method`, `path` (without the query string and the body, since they can hold passwords and tokens), `handler`, the status `code` and `remote`. Filter on `audit=admin` to review what an administrator did. The log is not tamper-proof: ship it to a place the administrators cannot write to if that matters.
 
 ## Not covered
 

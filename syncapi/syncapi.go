@@ -25,6 +25,7 @@ import (
 	userapi "github.com/element-hq/dendrite/userapi/api"
 
 	"github.com/element-hq/dendrite/syncapi/consumers"
+	"github.com/element-hq/dendrite/syncapi/internal"
 	"github.com/element-hq/dendrite/syncapi/notifier"
 	"github.com/element-hq/dendrite/syncapi/producers"
 	"github.com/element-hq/dendrite/syncapi/retention"
@@ -160,6 +161,7 @@ func AddPublicRoutes(
 		return eventID, eventTS, err
 	})
 
+	internal.SetRetention(&dendriteCfg.SyncAPI.Retention)
 	retention.Start(processContext.Context(), &dendriteCfg.SyncAPI.Retention, syncDB, rsAPI, fts)
 
 	rateLimits := httputil.NewRateLimits(&dendriteCfg.ClientAPI.RateLimiting)

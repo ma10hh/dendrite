@@ -29,6 +29,12 @@ that tools such as synapse-admin and Draupnir use, under `/_synapse/admin`. The 
 | `POST /v1/account_validity/validity` | Sets `expiration_ts` (milliseconds; 0 for never) of a user. After that time every request of the user is answered with 403 `ORG_MATRIX_EXPIRED_ACCOUNT` until an administrator sets a later time. **No renewal emails or tokens, and no automatic expiry for new accounts** (`enable_renewal_emails` is refused). Administrators and application services do not expire |
 | `GET /v1/threepid/{medium}/users/{address}` | The user that has the third-party identifier |
 | `GET /v1/statistics/users/media` | The users with the number and size of the media they uploaded. `displayname` is always empty, and `order_by=displayname` orders by user ID. Copies of remote media are not counted |
+| `GET` and `PUT /v1/users/{userId}/admin` | `{"admin": bool}`. An administrator cannot demote themselves |
+| `GET /v1/users/{userId}/pushers`, `GET /v1/users/{userId}/accountdata` | As Synapse's, with `total` for the pushers and `account_data.global` and `.rooms` |
+| `GET /v1/whois/{userId}` | The same answer as `/_matrix/client/v3/admin/whois` |
+| `GET /v1/username_available?username=` | `{"available": true}`, or 400 with `M_USER_IN_USE` or `M_INVALID_USERNAME`; the checks of registration |
+| `POST /v1/purge_media_cache?before_ts=` | Deletes the copies of media of other servers that were last used before the time; they are fetched again when asked for. Answers `{"deleted": n}`. Local media and quarantined media stay |
+| `GET /v1/background_updates/status`, `/enabled`, `GET /v1/scheduled_tasks`, `/v1/experimental_features/{userId}` | **Stubs**: Dendrite has none of these, so they answer with an empty list, and a change of an experimental feature is refused (400). They exist so that synapse-admin pages load |
 | `GET /v1/server_version` | |
 | `GET/POST /v1/event_reports`, `POST /v1/send_server_notice`, `/v1/register` | Existing, see their pages |
 
@@ -40,4 +46,4 @@ When authentication is delegated to Matrix Authentication Service, passwords and
 
 ## Not provided
 
-Room statistics, the federation destination endpoints, renewal of account validity by email, and `purge_history`. Tools that depend on them show an error for that page only.
+Room statistics, the federation destination endpoints, renewal of account validity by email, `purge_history`, `/v1/rooms/{roomId}/messages` and `/context` (the client handlers apply the history visibility of a member, and an administrator is not one), locking and suspending users, and login as a user. Tools that depend on them show an error for that page only.

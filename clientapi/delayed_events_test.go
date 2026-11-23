@@ -223,6 +223,7 @@ func TestDelayedEvents(t *testing.T) {
 			rec := httptest.NewRecorder()
 			routers.Client.ServeHTTP(rec, req)
 			assert.True(t, gjson.Get(rec.Body.String(), `unstable_features.org\.matrix\.msc4140`).Bool(), rec.Body.String())
+			assert.True(t, gjson.Get(rec.Body.String(), `unstable_features.org\.matrix\.msc4143`).Bool(), "transports are configured")
 
 			rec = httptest.NewRecorder()
 			routers.WellKnown.ServeHTTP(rec, test.NewRequest(t, http.MethodGet, "/.well-known/matrix/client"))
@@ -270,5 +271,6 @@ func TestDelayedEventsOff(t *testing.T) {
 		rec := httptest.NewRecorder()
 		routers.Client.ServeHTTP(rec, req)
 		assert.False(t, gjson.Get(rec.Body.String(), `unstable_features.org\.matrix\.msc4140`).Bool(), "not advertised")
+		assert.False(t, gjson.Get(rec.Body.String(), `unstable_features.org\.matrix\.msc4143`).Bool(), "no transports, not advertised")
 	})
 }
