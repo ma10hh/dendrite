@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/element-hq/dendrite/federationapi/api"
+	"github.com/element-hq/dendrite/federationapi/statistics"
 	"github.com/matrix-org/gomatrixserverlib"
 	"github.com/matrix-org/gomatrixserverlib/spec"
 	"github.com/matrix-org/util"
@@ -104,4 +105,32 @@ func (a *FederationInternalAPI) QueryServerKeys(
 	}
 	res.ServerKeys = []gomatrixserverlib.ServerKeys{*serverKeys}
 	return nil
+}
+
+func destinationInfo(s statistics.Snapshot) api.DestinationInfo {
+	return api.DestinationInfo{
+		ServerName: s.ServerName, Blacklisted: s.Blacklisted, AssumedOffline: s.AssumedOffline,
+		FailureCount: s.FailureCount, FirstFailureMS: s.FirstFailureMS, LastFailureMS: s.LastFailureMS,
+		BackoffIntervalMS: s.BackoffIntervalMS, SuccessCount: s.SuccessCount,
+	}
+}
+
+// QueryDestinations implements api.ClientFederationAPI
+func (f *FederationInternalAPI) QueryDestinations(ctx context.Context) ([]api.DestinationInfo, error) {
+	known := f.statistics.Known()
+	out := make([]api.DestinationInfo, 0, len(known))
+	for _, s := range known {
+		out = append(out, destinationInfo(s))
+	}
+	return out, nil
+}
+
+// QueryDestination implements api.ClientFederationAPI
+func (f *FederationInternalAPI) QueryDestination(ctx context.Context, serverName spec.ServerName) (api.DestinationInfo, error) {
+	return destinationInfo(f.statistics.ForServer(serverName).Snapshot()), nil
+}
+
+// ResetDestination implements api.ClientFederationAPI
+func (f *FederationInternalAPI) ResetDestination(ctx context.Context, serverName spec.ServerName) (bool, error) {
+	return f.statistics.ForServer(serverName).MarkServerAlive(), nil
 }

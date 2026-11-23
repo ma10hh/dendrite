@@ -123,6 +123,9 @@ type ServerStatistics struct {
 	backoffUntil      atomic.Value    // time.Time until this backoff interval ends
 	backoffCount      atomic.Uint32   // number of times BackoffDuration has been called
 	successCounter    atomic.Uint32   // how many times have we succeeded?
+	firstFailureMS    atomic.Int64    // when the current run of failures began (milliseconds), 0 if there is none
+	lastFailureMS     atomic.Int64    // when the last backoff began (milliseconds)
+	backoffIntervalMS atomic.Int64    // how long the last backoff was (milliseconds)
 	backoffNotifier   func()          // notifies destination queue when backoff completes
 	notifierMutex     sync.Mutex
 	knownRelayServers []spec.ServerName
@@ -164,6 +167,7 @@ func (s *ServerStatistics) AssignBackoffNotifier(notifier func()) {
 // `relay` specifies whether the success was to the actual destination
 // or one of their relay servers.
 func (s *ServerStatistics) Success(method SendMethod) {
+	s.firstFailureMS.Store(0)
 	s.cancel()
 	s.backoffCount.Store(0)
 	// NOTE : Sending to the final destination vs. a relay server has
@@ -220,8 +224,13 @@ func (s *ServerStatistics) Failure() (time.Time, bool) {
 		// We're starting a new back off so work out what the next interval
 		// will be.
 		count := s.backoffCount.Load()
-		until := time.Now().Add(s.duration(count))
+		interval := s.duration(count)
+		now := time.Now()
+		until := now.Add(interval)
 		s.backoffUntil.Store(until)
+		s.firstFailureMS.CompareAndSwap(0, now.UnixMilli())
+		s.lastFailureMS.Store(now.UnixMilli())
+		s.backoffIntervalMS.Store(interval.Milliseconds())
 
 		s.statistics.backoffMutex.Lock()
 		s.statistics.backoffTimers[s.serverName] = time.AfterFunc(time.Until(until), s.backoffFinished)
@@ -296,6 +305,7 @@ func (s *ServerStatistics) removeBlacklist() bool {
 		wasBlacklisted = true
 		_ = s.statistics.DB.RemoveServerFromBlacklist(s.serverName)
 	}
+	s.firstFailureMS.Store(0)
 	s.cancel()
 	s.backoffCount.Store(0)
 
@@ -357,4 +367,49 @@ func (s *ServerStatistics) AddRelayServers(relayServers []spec.ServerName) {
 			}
 		}
 	}
+}
+
+// Snapshot is what is known about one destination, for the admin API.
+type Snapshot struct {
+	ServerName     spec.ServerName
+	Blacklisted    bool
+	AssumedOffline bool
+	// FailureCount is the number of failures in the current run of them, 0 if the last attempt worked.
+	FailureCount uint32
+	// FirstFailureMS, LastFailureMS and BackoffIntervalMS are times in milliseconds, 0 if there were none since the
+	// start of the server.
+	FirstFailureMS    int64
+	LastFailureMS     int64
+	BackoffIntervalMS int64
+	SuccessCount      uint32
+}
+
+// Snapshot describes the destination. The state lives in memory, so it starts empty when the server starts, apart from
+// the blacklist and the assumed offline flag, which are in the database.
+func (s *ServerStatistics) Snapshot() Snapshot {
+	return Snapshot{
+		ServerName:        s.serverName,
+		Blacklisted:       s.Blacklisted(),
+		AssumedOffline:    s.AssumedOffline(),
+		FailureCount:      s.backoffCount.Load(),
+		FirstFailureMS:    s.firstFailureMS.Load(),
+		LastFailureMS:     s.lastFailureMS.Load(),
+		BackoffIntervalMS: s.backoffIntervalMS.Load(),
+		SuccessCount:      s.successCounter.Load(),
+	}
+}
+
+// Known describes the destinations that this server has contacted, or looked at, since it started.
+func (s *Statistics) Known() []Snapshot {
+	s.mutex.RLock()
+	servers := make([]*ServerStatistics, 0, len(s.servers))
+	for _, srv := range s.servers {
+		servers = append(servers, srv)
+	}
+	s.mutex.RUnlock()
+	out := make([]Snapshot, 0, len(servers))
+	for _, srv := range servers {
+		out = append(out, srv.Snapshot())
+	}
+	return out
 }

@@ -115,3 +115,40 @@ func TestRelayServersListing(t *testing.T) {
 	relayServers = server.KnownRelayServers()
 	assert.Equal(t, []spec.ServerName{"relay1", "relay2"}, relayServers)
 }
+
+func TestSnapshot(t *testing.T) {
+	stats := NewStatistics(nil, FailuresUntilBlacklist, FailuresUntilAssumedOffline, false)
+	server := ServerStatistics{statistics: &stats, serverName: "snap.example"}
+
+	if s := server.Snapshot(); s.FirstFailureMS != 0 || s.LastFailureMS != 0 || s.FailureCount != 0 {
+		t.Fatalf("a new server has no failures: %+v", s)
+	}
+
+	before := time.Now().UnixMilli()
+	server.Failure()
+	s := server.Snapshot()
+	assert.Equal(t, spec.ServerName("snap.example"), s.ServerName)
+	assert.Equal(t, uint32(1), s.FailureCount)
+	assert.GreaterOrEqual(t, s.FirstFailureMS, before)
+	assert.Equal(t, s.FirstFailureMS, s.LastFailureMS, "the first failure is also the last")
+	assert.Greater(t, s.BackoffIntervalMS, int64(0))
+
+	// The next failure after a backoff keeps the start of the run and moves the last one.
+	first := s.FirstFailureMS
+	server.cancel()
+	server.Failure()
+	s = server.Snapshot()
+	assert.Equal(t, first, s.FirstFailureMS, "the run of failures began at the first")
+	assert.Equal(t, uint32(2), s.FailureCount)
+	assert.GreaterOrEqual(t, s.LastFailureMS, first)
+
+	// A success ends the run.
+	server.Success(SendDirect)
+	s = server.Snapshot()
+	assert.Equal(t, uint32(0), s.FailureCount)
+	assert.Equal(t, int64(0), s.FirstFailureMS)
+	assert.Equal(t, uint32(1), s.SuccessCount)
+
+	known := stats.Known()
+	assert.Empty(t, known, "only servers that went through ForServer are known")
+}

@@ -47,6 +47,25 @@ type ClientFederationAPI interface {
 	// containing only the server names (without information for membership events).
 	// The response will include this server if they are joined to the room.
 	QueryJoinedHostServerNamesInRoom(ctx context.Context, request *QueryJoinedHostServerNamesInRoomRequest, response *QueryJoinedHostServerNamesInRoomResponse) error
+	// QueryDestinations describes the servers that this server has contacted since it started: how it is doing with them.
+	QueryDestinations(ctx context.Context) ([]DestinationInfo, error)
+	// QueryDestination describes one server, also if it has not been contacted.
+	QueryDestination(ctx context.Context, serverName spec.ServerName) (DestinationInfo, error)
+	// ResetDestination forgets the failures of a server and takes it off the blacklist and the list of servers that are
+	// assumed offline, so that the next attempt is made at once. It says whether the server was blacklisted.
+	ResetDestination(ctx context.Context, serverName spec.ServerName) (wasBlacklisted bool, err error)
+}
+
+// DestinationInfo is how sending to one other server is going. Times are in milliseconds.
+type DestinationInfo struct {
+	ServerName        spec.ServerName
+	Blacklisted       bool
+	AssumedOffline    bool
+	FailureCount      uint32
+	FirstFailureMS    int64
+	LastFailureMS     int64
+	BackoffIntervalMS int64
+	SuccessCount      uint32
 }
 
 type RoomserverFederationAPI interface {

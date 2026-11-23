@@ -299,6 +299,23 @@ func Setup(
 			return SynapseAdminScheduledTasks(req)
 		}),
 	).Methods(http.MethodGet, http.MethodOptions)
+	if federationSender != nil {
+		synapseAdminRouter.Handle("/admin/v1/federation/destinations",
+			httputil.MakeAdminAPI("synapse_admin_destinations", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+				return SynapseAdminListDestinations(req, federationSender)
+			}),
+		).Methods(http.MethodGet, http.MethodOptions)
+		synapseAdminRouter.Handle("/admin/v1/federation/destinations/{destination}",
+			httputil.MakeAdminAPI("synapse_admin_destination", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+				return SynapseAdminGetDestination(req, federationSender)
+			}),
+		).Methods(http.MethodGet, http.MethodOptions)
+		synapseAdminRouter.Handle("/admin/v1/federation/destinations/{destination}/reset_connection",
+			httputil.MakeAdminAPI("synapse_admin_destination_reset", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+				return SynapseAdminResetDestination(req, federationSender)
+			}),
+		).Methods(http.MethodPost, http.MethodOptions)
+	}
 	synapseAdminRouter.Handle("/admin/v1/users/{userId}/joined_rooms",
 		httputil.MakeAdminAPI("synapse_admin_joined_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return SynapseAdminJoinedRooms(req, cfg, userAPI, rsAPI)
