@@ -72,6 +72,12 @@ func VerifyUserFromRequest(
 			JSON: spec.MatrixError{ErrCode: "M_UNKNOWN_DEVICE", Err: "The appservice asserted a device that does not exist"},
 		}
 	}
+	if res.Expired {
+		return nil, &util.JSONResponse{
+			Code: http.StatusForbidden,
+			JSON: spec.MatrixError{ErrCode: "ORG_MATRIX_EXPIRED_ACCOUNT", Err: "Account has expired"},
+		}
+	}
 	if res.Err != "" {
 		if strings.HasPrefix(strings.ToLower(res.Err), "forbidden:") { // TODO: use actual error and no string comparison
 			return nil, &util.JSONResponse{

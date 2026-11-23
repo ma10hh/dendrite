@@ -106,6 +106,13 @@ type ClientUserAPI interface {
 	AdminListAccounts(ctx context.Context, filter AccountListFilter) ([]AccountListEntry, int, error)
 	// AdminSetAccountType makes an account an admin (AccountTypeAdmin) or a plain user (AccountTypeUser).
 	AdminSetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType AccountType) error
+	// AdminAccountRestrictions returns the shadow ban, the rate limit override and the expiry of an account.
+	AdminAccountRestrictions(ctx context.Context, localpart string, serverName spec.ServerName) (AccountRestrictions, error)
+	AdminSetShadowBan(ctx context.Context, localpart string, serverName spec.ServerName, banned bool) error
+	// AdminSetRateLimitOverride sets the rate limit of one user, nil removes it.
+	AdminSetRateLimitOverride(ctx context.Context, localpart string, serverName spec.ServerName, limit *RateLimitOverride) error
+	// AdminSetAccountExpiry sets the time (milliseconds) at which the account stops working, 0 for never.
+	AdminSetAccountExpiry(ctx context.Context, localpart string, serverName spec.ServerName, expiresTS int64) error
 	PerformOpenIDTokenCreation(ctx context.Context, req *PerformOpenIDTokenCreationRequest, res *PerformOpenIDTokenCreationResponse) error
 	QueryNotifications(ctx context.Context, req *QueryNotificationsRequest, res *QueryNotificationsResponse) error
 	InputAccountData(ctx context.Context, req *InputAccountDataRequest, res *InputAccountDataResponse) error
@@ -279,6 +286,8 @@ type QueryAccessTokenResponse struct {
 	Err    string // e.g ErrorForbidden
 	// UnknownDevice is set if an appservice asserted a device that does not exist (MSC4326).
 	UnknownDevice bool
+	// Expired is set if the account has stopped working because an administrator gave it an expiry.
+	Expired bool
 }
 
 // QueryAccountDataRequest is the request for QueryAccountData
@@ -454,6 +463,10 @@ type Device struct {
 	// this is the appservice ID.
 	AppserviceID string
 	AccountType  AccountType
+	// ShadowBanned is set by an administrator: the events and invites of the user are dropped without telling the user.
+	ShadowBanned bool
+	// RateLimit replaces the rate limit of the server for this user, if not nil.
+	RateLimit *RateLimitOverride
 }
 
 func (d *Device) UserDomain() spec.ServerName {
@@ -1019,14 +1032,29 @@ type AccountListFilter struct {
 }
 
 // AccountListEntry is one account of such a list.
+// RateLimitOverride is the rate limit of one user, set by an administrator. Zero for both means no limit.
+type RateLimitOverride struct {
+	MessagesPerSecond float64 `json:"messages_per_second"`
+	BurstCount        int     `json:"burst_count"`
+}
+
+// AccountRestrictions is what an administrator has set for an account.
+type AccountRestrictions struct {
+	ShadowBanned bool
+	RateLimit    *RateLimitOverride
+	// ExpiresTS is the time in milliseconds at which the account stops working, 0 for never.
+	ExpiresTS int64
+}
+
 type AccountListEntry struct {
-	UserID      string
-	Localpart   string
-	ServerName  spec.ServerName
-	CreatedTS   int64
-	AccountType AccountType
-	AppService  string
-	Deactivated bool
-	DisplayName string
-	AvatarURL   string
+	UserID       string
+	Localpart    string
+	ServerName   spec.ServerName
+	CreatedTS    int64
+	AccountType  AccountType
+	AppService   string
+	Deactivated  bool
+	DisplayName  string
+	AvatarURL    string
+	ShadowBanned bool
 }

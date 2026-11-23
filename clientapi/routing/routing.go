@@ -215,6 +215,26 @@ func Setup(
 			return SynapseAdminDeleteDevices(req, cfg, userAPI)
 		}),
 	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/shadow_ban",
+		httputil.MakeAdminAPI("synapse_admin_shadow_ban", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminShadowBan(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/users/{userId}/override_ratelimit",
+		httputil.MakeAdminAPI("synapse_admin_override_ratelimit", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminRateLimit(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/account_validity/validity",
+		httputil.MakeAdminAPI("synapse_admin_account_validity", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminAccountValidity(req, cfg, userAPI)
+		}),
+	).Methods(http.MethodPost, http.MethodOptions)
+	synapseAdminRouter.Handle("/admin/v1/threepid/{medium}/users/{address}",
+		httputil.MakeAdminAPI("synapse_admin_threepid_user", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
+			return SynapseAdminUserByThreePID(req, userAPI)
+		}),
+	).Methods(http.MethodGet, http.MethodOptions)
 	synapseAdminRouter.Handle("/admin/v1/users/{userId}/joined_rooms",
 		httputil.MakeAdminAPI("synapse_admin_joined_rooms", userAPI, func(req *http.Request, device *userapi.Device) util.JSONResponse {
 			return SynapseAdminJoinedRooms(req, cfg, userAPI, rsAPI)

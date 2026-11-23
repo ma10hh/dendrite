@@ -1,6 +1,7 @@
 package httputil
 
 import (
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -74,6 +75,7 @@ func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSON
 	// First of all, work out if X-Forwarded-For was sent to us. If not
 	// then we'll just use the IP address of the caller.
 	var caller string
+	threshold, cooloff := l.requestThreshold, l.cooloffDuration
 	if device != nil {
 		switch device.AccountType {
 		case userapi.AccountTypeAdmin:
@@ -86,6 +88,16 @@ func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSON
 				return nil
 			}
 			caller = device.UserID + device.ID
+			if o := device.RateLimit; o != nil {
+				// An administrator has set the limit of this user: both 0 means none. The key holds the numbers, so that a
+				// changed limit starts with a new set of slots.
+				if o.MessagesPerSecond <= 0 || o.BurstCount <= 0 {
+					return nil
+				}
+				threshold = int64(o.BurstCount)
+				cooloff = time.Duration(float64(time.Second) / o.MessagesPerSecond)
+				caller = fmt.Sprintf("%s|%d|%d", caller, threshold, cooloff)
+			}
 		}
 	} else {
 		if forwardedFor := req.Header.Get("X-Forwarded-For"); forwardedFor != "" {
@@ -103,7 +115,7 @@ func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSON
 	// If the caller doesn't have a channel, create one and write it
 	// back to the map.
 	if !ok {
-		rateLimit = make(chan struct{}, l.requestThreshold)
+		rateLimit = make(chan struct{}, threshold)
 
 		l.limitsMutex.Lock()
 		l.limits[caller] = rateLimit
@@ -118,14 +130,14 @@ func (l *RateLimits) Limit(req *http.Request, device *userapi.Device) *util.JSON
 		// We hit the rate limit. Tell the client to back off.
 		return &util.JSONResponse{
 			Code: http.StatusTooManyRequests,
-			JSON: spec.LimitExceeded("You are sending too many requests too quickly!", l.cooloffDuration.Milliseconds()),
+			JSON: spec.LimitExceeded("You are sending too many requests too quickly!", cooloff.Milliseconds()),
 		}
 	}
 
 	// After the time interval, drain a resource from the rate limiting
 	// channel. This will free up space in the channel for new requests.
 	go func() {
-		<-time.After(l.cooloffDuration)
+		<-time.After(cooloff)
 		<-rateLimit
 	}()
 	return nil

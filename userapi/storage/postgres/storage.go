@@ -81,6 +81,10 @@ func NewDatabase(ctx context.Context, conMan *sqlutil.Connections, dbProperties 
 	if err != nil {
 		return nil, fmt.Errorf("NewPostgresProfilesTable: %w", err)
 	}
+	restrictionsTable, err := NewPostgresAccountRestrictionsTable(db)
+	if err != nil {
+		return nil, fmt.Errorf("NewPostgresAccountRestrictionsTable: %w", err)
+	}
 	threePIDTable, err := NewPostgresThreePIDTable(db)
 	if err != nil {
 		return nil, fmt.Errorf("NewPostgresThreePIDTable: %w", err)
@@ -119,6 +123,7 @@ func NewDatabase(ctx context.Context, conMan *sqlutil.Connections, dbProperties 
 		OpenIDTokens:          openIDTable,
 		Profiles:              profilesTable,
 		ThreePIDs:             threePIDTable,
+		Restrictions:          restrictionsTable,
 		Pushers:               pusherTable,
 		Notifications:         notificationsTable,
 		RegistrationTokens:    registationTokensTable,

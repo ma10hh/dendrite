@@ -89,6 +89,14 @@ func (a *UserInternalAPI) queryDelegatedAuthToken(ctx context.Context, accessTok
 	if token.IsAdmin {
 		device.AccountType = api.AccountTypeAdmin
 	}
+	expired, err := a.applyRestrictions(ctx, device, localpart, serverName)
+	if err != nil {
+		return err
+	}
+	if expired {
+		res.Expired = true
+		return nil
+	}
 	res.Device = device
 	return nil
 }

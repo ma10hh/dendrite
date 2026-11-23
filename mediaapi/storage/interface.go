@@ -38,6 +38,8 @@ type MediaRetention interface {
 	// UnusedMedia returns up to limit media, oldest first, that was last used before the time and is not quarantined: of
 	// this server if local, else of the others.
 	UnusedMedia(ctx context.Context, local bool, server spec.ServerName, before spec.Timestamp, limit int) ([]types.MediaMetadata, error)
+	// UserMediaStatistics lists the users with the number and size of their uploads, and how many users match.
+	UserMediaStatistics(ctx context.Context, f types.UserMediaStatisticsFilter) ([]types.UserMediaStatistics, int, error)
 }
 
 type MediaRepository interface {

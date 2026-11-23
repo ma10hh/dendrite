@@ -66,6 +66,7 @@ func synapseUserFromEntry(e userapi.AccountListEntry) synapseUser {
 		AvatarURL:   optionalString(e.AvatarURL),
 		CreationTS:  e.CreatedTS,
 		AppService:  optionalString(e.AppService),
+		ShadowBan:   boolInt(e.ShadowBanned),
 	}
 	if e.AccountType == userapi.AccountTypeAppService {
 		appservice := "appservice"

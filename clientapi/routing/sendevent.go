@@ -8,6 +8,8 @@ package routing
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -121,6 +123,10 @@ func SendEvent(
 	resErr := httputil.UnmarshalJSONRequest(req, &r)
 	if resErr != nil {
 		return *resErr
+	}
+
+	if device.ShadowBanned {
+		return shadowBannedEventResponse()
 	}
 
 	if stateKey != nil {
@@ -468,4 +474,17 @@ func generateSendEvent(
 	}
 
 	return e.PDU, nil
+}
+
+// shadowBannedEventResponse is what a shadow banned user is told when they send an event: that it worked. Nothing is
+// sent and the event ID is made up.
+func shadowBannedEventResponse() util.JSONResponse {
+	id := make([]byte, 32)
+	if _, err := rand.Read(id); err != nil {
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	return util.JSONResponse{
+		Code: http.StatusOK,
+		JSON: sendEventResponse{EventID: "$" + base64.RawURLEncoding.EncodeToString(id)},
+	}
 }

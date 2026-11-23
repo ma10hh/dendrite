@@ -98,6 +98,17 @@ type ProfileTable interface {
 	SelectProfilesBySearch(ctx context.Context, searchString string, limit int) ([]authtypes.Profile, error)
 }
 
+// AccountRestrictionsTable holds what an administrator has set for an account: a shadow ban, a rate limit and an expiry.
+type AccountRestrictionsTable interface {
+	// SelectRestrictions returns the restrictions of the account; the zero value if there are none.
+	SelectRestrictions(ctx context.Context, txn *sql.Tx, localpart string, serverName spec.ServerName) (api.AccountRestrictions, error)
+	SetShadowBanned(ctx context.Context, txn *sql.Tx, localpart string, serverName spec.ServerName, banned bool) error
+	// SetRateLimit sets the override of the rate limit, nil removes it.
+	SetRateLimit(ctx context.Context, txn *sql.Tx, localpart string, serverName spec.ServerName, limit *api.RateLimitOverride) error
+	// SetExpiry sets the time at which the account expires, 0 for never.
+	SetExpiry(ctx context.Context, txn *sql.Tx, localpart string, serverName spec.ServerName, expiresTS int64) error
+}
+
 type ThreePIDTable interface {
 	SelectLocalpartForThreePID(ctx context.Context, txn *sql.Tx, threepid string, medium string) (localpart string, serverName spec.ServerName, err error)
 	SelectThreePIDsForLocalpart(ctx context.Context, localpart string, serverName spec.ServerName) (threepids []authtypes.ThreePID, err error)

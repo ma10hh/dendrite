@@ -604,6 +604,14 @@ func (a *UserInternalAPI) QueryAccessToken(ctx context.Context, req *api.QueryAc
 		return err
 	}
 	device.AccountType = acc.AccountType
+	expired, err := a.applyRestrictions(ctx, device, localPart, domain)
+	if err != nil {
+		return err
+	}
+	if expired {
+		res.Expired = true
+		return nil
+	}
 	res.Device = device
 	return nil
 }
@@ -1031,4 +1039,39 @@ func (a *UserInternalAPI) AdminListAccounts(ctx context.Context, filter api.Acco
 // AdminSetAccountType implements api.ClientUserAPI
 func (a *UserInternalAPI) AdminSetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType) error {
 	return a.DB.SetAccountType(ctx, localpart, serverName, accountType)
+}
+
+// AdminAccountRestrictions implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminAccountRestrictions(ctx context.Context, localpart string, serverName spec.ServerName) (api.AccountRestrictions, error) {
+	return a.DB.AccountRestrictions(ctx, localpart, serverName)
+}
+
+// AdminSetShadowBan implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminSetShadowBan(ctx context.Context, localpart string, serverName spec.ServerName, banned bool) error {
+	return a.DB.SetShadowBanned(ctx, localpart, serverName, banned)
+}
+
+// AdminSetRateLimitOverride implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminSetRateLimitOverride(ctx context.Context, localpart string, serverName spec.ServerName, limit *api.RateLimitOverride) error {
+	return a.DB.SetRateLimitOverride(ctx, localpart, serverName, limit)
+}
+
+// AdminSetAccountExpiry implements api.ClientUserAPI
+func (a *UserInternalAPI) AdminSetAccountExpiry(ctx context.Context, localpart string, serverName spec.ServerName, expiresTS int64) error {
+	return a.DB.SetAccountExpiry(ctx, localpart, serverName, expiresTS)
+}
+
+// applyRestrictions copies what an administrator has set for the account to the device, and reports whether the
+// account has expired. Administrators and application services never expire: they could not be fixed otherwise.
+func (a *UserInternalAPI) applyRestrictions(ctx context.Context, device *api.Device, localpart string, serverName spec.ServerName) (expired bool, err error) {
+	r, err := a.DB.AccountRestrictions(ctx, localpart, serverName)
+	if err != nil {
+		return false, err
+	}
+	device.ShadowBanned = r.ShadowBanned
+	device.RateLimit = r.RateLimit
+	if r.ExpiresTS > 0 && device.AccountType != api.AccountTypeAdmin && device.AccountType != api.AccountTypeAppService {
+		return r.ExpiresTS <= time.Now().UnixMilli(), nil
+	}
+	return false, nil
 }

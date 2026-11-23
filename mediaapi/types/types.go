@@ -105,3 +105,24 @@ const Crop = "crop"
 
 // Scale indicates we should scale the thumbnail on resize
 const Scale = "scale"
+
+// UserMediaStatisticsFilter says which users the statistics of uploaded media are for.
+type UserMediaStatisticsFilter struct {
+	// Origin is the server whose uploads are counted: the local server.
+	Origin spec.ServerName
+	// FromTS and UntilTS bound the upload time (milliseconds, from included, until excluded); 0 is no bound.
+	FromTS, UntilTS int64
+	// Search is a part of the user ID, in any case.
+	Search    string
+	OrderBy   string
+	Backwards bool
+	From      int
+	Limit     int
+}
+
+// UserMediaStatistics is what one user has uploaded.
+type UserMediaStatistics struct {
+	UserID      string
+	MediaCount  int64
+	MediaLength int64
+}

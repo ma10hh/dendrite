@@ -8,6 +8,8 @@ package shared
 import (
 	"context"
 	"database/sql"
+	"fmt"
+	"strings"
 
 	"github.com/matrix-org/gomatrixserverlib/spec"
 
@@ -46,4 +48,57 @@ func (d *Database) UnusedMedia(ctx context.Context, local bool, server spec.Serv
 	}
 	defer internal.CloseAndLogIfError(ctx, rows, "UnusedMedia: rows.close() failed")
 	return scanMedia(rows)
+}
+
+// UserMediaStatistics lists the users with the number and total size of the media they uploaded to this server, for the
+// admin statistics, and says how many users match.
+func (d *Database) UserMediaStatistics(ctx context.Context, f types.UserMediaStatisticsFilter) ([]types.UserMediaStatistics, int, error) {
+	orderColumns := map[string]string{"": "user_id", "user_id": "user_id", "media_count": "media_count", "media_length": "media_length"}
+	order, ok := orderColumns[f.OrderBy]
+	if !ok {
+		return nil, 0, types.ErrUnknownOrder
+	}
+	args := []any{f.Origin}
+	arg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+	where := "media_origin = $1"
+	if f.FromTS > 0 {
+		where += " AND creation_ts >= " + arg(f.FromTS)
+	}
+	if f.UntilTS > 0 {
+		where += " AND creation_ts < " + arg(f.UntilTS)
+	}
+	if f.Search != "" {
+		escaped := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(strings.ToLower(f.Search))
+		where += ` AND LOWER(user_id) LIKE ` + arg("%"+escaped+"%") + ` ESCAPE '\'`
+	}
+	grouped := " FROM mediaapi_media_repository WHERE " + where + " GROUP BY user_id"
+
+	var total int
+	if err := d.DB.QueryRowContext(ctx, "SELECT COUNT(*) FROM (SELECT user_id"+grouped+") AS users", args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	direction := "ASC"
+	if f.Backwards {
+		direction = "DESC"
+	}
+	limit, offset := arg(f.Limit), arg(f.From)
+	rows, err := d.DB.QueryContext(ctx,
+		"SELECT user_id, COUNT(*) AS media_count, COALESCE(SUM(file_size_bytes), 0) AS media_length"+grouped+
+			" ORDER BY "+order+" "+direction+", user_id ASC LIMIT "+limit+" OFFSET "+offset, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "UserMediaStatistics: rows.close() failed")
+	var out []types.UserMediaStatistics
+	for rows.Next() {
+		var s types.UserMediaStatistics
+		if err = rows.Scan(&s.UserID, &s.MediaCount, &s.MediaLength); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, s)
+	}
+	return out, total, rows.Err()
 }

@@ -41,6 +41,7 @@ type Database struct {
 	Profiles              tables.ProfileTable
 	AccountDatas          tables.AccountDataTable
 	ThreePIDs             tables.ThreePIDTable
+	Restrictions          tables.AccountRestrictionsTable
 	OpenIDTokens          tables.OpenIDTable
 	KeyBackups            tables.KeyBackupTable
 	KeyBackupVersions     tables.KeyBackupVersionTable

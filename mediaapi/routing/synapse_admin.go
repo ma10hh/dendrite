@@ -40,6 +40,7 @@ func setupSynapseAdmin(
 	handle("/admin/v1/user/{userId}/media/quarantine", "synapse_admin_quarantine_user", media.quarantineUser, http.MethodPost)
 	handle("/admin/v1/media/{server}/{mediaId}", "synapse_admin_delete_media", media.deleteOne, http.MethodDelete)
 	handle("/admin/v1/media/{server}/delete", "synapse_admin_delete_old_media", media.deleteOld, http.MethodPost)
+	handle("/admin/v1/statistics/users/media", "synapse_admin_user_media_statistics", media.userStatistics, http.MethodGet)
 	handle("/admin/v1/users/{userId}/media", "synapse_admin_user_media", func(r *http.Request) util.JSONResponse {
 		if r.Method == http.MethodDelete {
 			return media.deleteUser(r)
@@ -238,6 +239,67 @@ func (a *mediaAdmin) listUser(req *http.Request) util.JSONResponse {
 	}
 	body := map[string]any{"media": out, "total": total}
 	if next := from + len(media); next < total {
+		body["next_token"] = next
+	}
+	return util.JSONResponse{Code: http.StatusOK, JSON: body}
+}
+
+// userStatistics implements GET /_synapse/admin/v1/statistics/users/media: what each user has uploaded.
+func (a *mediaAdmin) userStatistics(req *http.Request) util.JSONResponse {
+	q := req.URL.Query()
+	f := types.UserMediaStatisticsFilter{Origin: a.cfg.Matrix.ServerName, Search: q.Get("search_term"), OrderBy: q.Get("order_by"), Limit: 100}
+	if f.OrderBy == "displayname" {
+		// Display names are the profiles' and not known here: the user ID is the nearest thing to order by.
+		f.OrderBy = "user_id"
+	}
+	for name, dst := range map[string]*int{"from": &f.From, "limit": &f.Limit} {
+		if v := q.Get(name); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam(name + " must be a non-negative integer")}
+			}
+			*dst = n
+		}
+	}
+	for name, dst := range map[string]*int64{"from_ts": &f.FromTS, "until_ts": &f.UntilTS} {
+		if v := q.Get(name); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam(name + " must be a time in milliseconds")}
+			}
+			*dst = n
+		}
+	}
+	if f.FromTS > 0 && f.UntilTS > 0 && f.UntilTS <= f.FromTS {
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("until_ts must be after from_ts")}
+	}
+	switch q.Get("dir") {
+	case "", "f":
+	case "b":
+		f.Backwards = true
+	default:
+		return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("dir must be f or b")}
+	}
+	stats, total, err := a.db.UserMediaStatistics(req.Context(), f)
+	if err != nil {
+		if errors.Is(err, types.ErrUnknownOrder) {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.InvalidParam("order_by must be user_id, displayname, media_length or media_count")}
+		}
+		util.GetLogger(req.Context()).WithError(err).Error("UserMediaStatistics failed")
+		return util.JSONResponse{Code: http.StatusInternalServerError, JSON: spec.InternalServerError{}}
+	}
+	type entry struct {
+		UserID      string `json:"user_id"`
+		DisplayName string `json:"displayname"`
+		MediaCount  int64  `json:"media_count"`
+		MediaLength int64  `json:"media_length"`
+	}
+	users := make([]entry, 0, len(stats))
+	for _, s := range stats {
+		users = append(users, entry{UserID: s.UserID, MediaCount: s.MediaCount, MediaLength: s.MediaLength})
+	}
+	body := map[string]any{"users": users, "total": total}
+	if next := f.From + len(stats); next < total {
 		body["next_token"] = next
 	}
 	return util.JSONResponse{Code: http.StatusOK, JSON: body}

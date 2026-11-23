@@ -66,6 +66,9 @@ func SendRedaction(
 	if resErr != nil {
 		return *resErr
 	}
+	if device.ShadowBanned {
+		return shadowBannedEventResponse()
+	}
 
 	// if user is member of room, and sender ID is nil, then this user doesn't have a pseudo ID for some reason,
 	// which is unexpected.

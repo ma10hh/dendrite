@@ -287,6 +287,10 @@ func SendInvite(
 		return *reqErr
 	}
 
+	if device.ShadowBanned {
+		return util.JSONResponse{Code: http.StatusOK, JSON: struct{}{}}
+	}
+
 	inviteStored, jsonErrResp := checkAndProcessThreepid(
 		req, device, body, cfg, rsAPI, profileAPI, roomID, evTime,
 	)

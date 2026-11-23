@@ -45,7 +45,7 @@ Element X and an administrator of a small server need. Everything new that chang
 | Sign-in through the **Matrix Authentication Service** (MSC3861), provisioning endpoints for MAS, QR code sign-in (MSC4388), appservice device management (MSC4190) | No | Yes, tested with MAS 1.29.0 in `contrib/mas-lab` | Off (`client_api.msc3861`) |
 | Client API: knocking, thread list, room summary, bundled edits, threads and references, `state_after` in `/sync`, `timestamp_to_event`, room types in `/publicRooms` | Missing or partial | Yes | On |
 | URL previews, with protection against requests to private networks | No | Yes | Off (`media_api.url_previews`) |
-| Admin API | `/_dendrite/admin` | Also the Synapse admin API at `/_synapse/admin` (users, rooms, block list, media quarantine and deletion, registration tokens) | On, admins only |
+| Admin API | `/_dendrite/admin` | Also the Synapse admin API at `/_synapse/admin` (users, rooms, block list, media quarantine and deletion, registration tokens, shadow bans, rate limit overrides, account expiry, media statistics) | On, admins only |
 | Media: quota per user, deletion of media nobody downloaded | No | Yes | Off (`media_api.max_user_storage_bytes`, `media_api.retention`) |
 | Message retention policies (`m.room.retention`, MSC1763): old messages are deleted | No | Yes | Off (`sync_api.retention.enabled`) |
 | Metrics | A few | Also the duration of every request, the database pools and the new features | With `global.metrics.enabled` |
@@ -64,8 +64,8 @@ The whole list with the reasons is in [`CHANGES.md`](CHANGES.md), the decisions 
 For servers on upstream `element-hq/dendrite` (or `matrix-org/dendrite`) **0.15.x**, with PostgreSQL or SQLite. Your users, rooms, media,
 signing key and configuration stay as they are: the fork reads the same databases and the same `dendrite.yaml`.
 
-**What changes in the databases.** On the first start, the migrations add: three tables (`roomserver_partial_state_rooms`,
-`roomserver_partial_state_events`, `roomserver_blocked_rooms`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
+**What changes in the databases.** On the first start, the migrations add: four tables (`roomserver_partial_state_rooms`,
+`roomserver_partial_state_events`, `roomserver_blocked_rooms`, `userapi_account_restrictions`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
 and two indexes on it (`user_id`, `base64hash`: a moment on a table with millions of rows). The sync API events table gets two columns (`origin_server_ts`, `is_state`) and an index,
 and the migration reads every stored event once to fill them, which takes a while on a database with millions of events. Nothing is renamed or removed. Sliding sync sessions are
 kept in memory, not in the database.
@@ -169,7 +169,7 @@ What this fork does, by area. "Tested" means automated tests on SQLite and Postg
 | Knocking, room summary (MSC3266), thread list (MSC3856), `timestamp_to_event` (MSC3030, from this server's copy of the room), bundled aggregations, URL previews (off by default, with SSRF protection), `context` state, public room types | Supported, tested | Not done: `mutual_rooms`, dehydrated devices (MSC3814), peeking, `/events` and `/initialSync` stubs |
 | Federation | Supported | The upstream federation code, with knocking added. Complement runs against this fork, see `docs/development/decisions.md` for the results |
 | Faster joins / partial state (MSC3706) | **Experimental, off, do not enable** | `federation_api.partial_state_joins`. Never tried against a real large room; see decision entries 73 to 79 for what is open |
-| Synapse admin API (users, rooms, block list, media quarantine and deletion, registration tokens) | Supported, tested | What differs from Synapse is in `docs/administration/8_synapse_adminapi.md`. synapse-admin and Draupnir were not run against it |
+| Synapse admin API (users, rooms, block list, media quarantine and deletion, registration tokens, shadow bans, rate limit overrides, account expiry, media statistics) | Supported, tested | What differs from Synapse is in `docs/administration/8_synapse_adminapi.md`. synapse-admin and Draupnir were not run against it |
 | Media: quota per user, deletion of unused media | Supported, tested | Off by default, `docs/administration/9_media.md` |
 | Metrics (Prometheus), backup and upgrade guides, moving from Synapse | Documented | `docs/administration/10_metrics.md` to `12_from_synapse.md`. There is no Synapse importer |
 | Message retention policies (`m.room.retention`) | Supported, tested | Off by default, `docs/administration/13_message_retention.md`. A migration adds two columns to the sync API events table |

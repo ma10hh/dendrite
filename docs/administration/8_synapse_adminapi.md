@@ -24,6 +24,11 @@ that tools such as synapse-admin and Draupnir use, under `/_synapse/admin`. The 
 | `POST /v1/media/quarantine/{server}/{mediaId}`, `.../unquarantine/...`, `POST /v1/user/{userId}/media/quarantine` | Quarantined media is answered as not found. Only the media ID is quarantined: the same file uploaded again is a new media ID. Quarantining the media of a room is not supported |
 | `DELETE /v1/media/{server}/{mediaId}`, `POST /v1/media/{server}/delete?before_ts=&size_gt=`, `GET` and `DELETE /v1/users/{userId}/media` | Local media only. The file and its thumbnails go with the last media that uses them. `before_ts` is compared with the time of the last download, or of the upload if there was none (the same as Synapse's `last_access_ts`). Downloads are recorded at most once an hour per media |
 | `GET/POST/PUT/DELETE /v1/registration_tokens`, `/new`, `/{token}` | The same as `/_dendrite/admin/registrationTokens` |
+| `POST` and `DELETE /v1/users/{userId}/shadow_ban` | Turns the shadow ban of a user on or off (`shadow_banned` is shown in the user). While it is on, **events, redactions and invites** of the user (client API) are dropped, and the user is told that they worked, with a made-up event ID. Joining, leaving, profile changes, typing, receipts and presence are **not** affected, and nothing that happened before the ban is hidden. Administrators and application services cannot be banned |
+| `GET`, `POST` and `DELETE /v1/users/{userId}/override_ratelimit` | The rate limit of one user, replacing that of the server (`client_api.rate_limiting`): `messages_per_second` and `burst_count`, both above 0, or both 0 for no limit. Dendrite counts a burst of `burst_count` requests that each take a slot for `1 / messages_per_second` seconds. Has no effect while `client_api.rate_limiting.enabled` is false, and administrators are never limited |
+| `POST /v1/account_validity/validity` | Sets `expiration_ts` (milliseconds; 0 for never) of a user. After that time every request of the user is answered with 403 `ORG_MATRIX_EXPIRED_ACCOUNT` until an administrator sets a later time. **No renewal emails or tokens, and no automatic expiry for new accounts** (`enable_renewal_emails` is refused). Administrators and application services do not expire |
+| `GET /v1/threepid/{medium}/users/{address}` | The user that has the third-party identifier |
+| `GET /v1/statistics/users/media` | The users with the number and size of the media they uploaded. `displayname` is always empty, and `order_by=displayname` orders by user ID. Copies of remote media are not counted |
 | `GET /v1/server_version` | |
 | `GET/POST /v1/event_reports`, `POST /v1/send_server_notice`, `/v1/register` | Existing, see their pages |
 
@@ -35,5 +40,4 @@ When authentication is delegated to Matrix Authentication Service, passwords and
 
 ## Not provided
 
-Shadow banning, user statistics, room statistics, retention policies, account validity, rate limit overrides and the
-federation destination endpoints. Tools that depend on them show an error for that page only.
+Room statistics, the federation destination endpoints, renewal of account validity by email, and `purge_history`. Tools that depend on them show an error for that page only.

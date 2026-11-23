@@ -49,6 +49,10 @@ type Account interface {
 	CheckAccountAvailability(ctx context.Context, localpart string, serverName spec.ServerName) (bool, error)
 	AdminListAccounts(ctx context.Context, filter api.AccountListFilter) ([]api.AccountListEntry, int, error)
 	SetAccountType(ctx context.Context, localpart string, serverName spec.ServerName, accountType api.AccountType) error
+	AccountRestrictions(ctx context.Context, localpart string, serverName spec.ServerName) (api.AccountRestrictions, error)
+	SetShadowBanned(ctx context.Context, localpart string, serverName spec.ServerName, banned bool) error
+	SetRateLimitOverride(ctx context.Context, localpart string, serverName spec.ServerName, limit *api.RateLimitOverride) error
+	SetAccountExpiry(ctx context.Context, localpart string, serverName spec.ServerName, expiresTS int64) error
 	GetAccountByLocalpart(ctx context.Context, localpart string, serverName spec.ServerName) (*api.Account, error)
 	DeactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)
 	ReactivateAccount(ctx context.Context, localpart string, serverName spec.ServerName) (err error)
