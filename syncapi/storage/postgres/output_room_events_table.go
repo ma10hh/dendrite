@@ -79,8 +79,8 @@ CREATE INDEX IF NOT EXISTS syncapi_output_room_events_recent_events_idx ON synca
 
 const insertEventSQL = "" +
 	"INSERT INTO syncapi_output_room_events (" +
-	"room_id, event_id, headered_event_json, type, sender, contains_url, add_state_ids, remove_state_ids, session_id, transaction_id, exclude_from_sync, history_visibility" +
-	") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) " +
+	"room_id, event_id, headered_event_json, type, sender, contains_url, add_state_ids, remove_state_ids, session_id, transaction_id, exclude_from_sync, history_visibility, origin_server_ts, is_state" +
+	") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) " +
 	"ON CONFLICT ON CONSTRAINT syncapi_output_room_event_id_idx DO UPDATE SET exclude_from_sync = (excluded.exclude_from_sync AND $11) " +
 	"RETURNING id"
 
@@ -178,6 +178,13 @@ const selectContextAfterEventSQL = "" +
 	" AND ( $7::text[] IS NULL OR NOT(type LIKE ANY($7)) )" +
 	" ORDER BY id ASC LIMIT $3"
 
+const selectRetentionCandidatesSQL = "" +
+	"SELECT event_id FROM syncapi_output_room_events WHERE room_id = $1 AND origin_server_ts > 0 AND origin_server_ts < $2 AND is_state = FALSE" +
+	" ORDER BY origin_server_ts ASC, id ASC LIMIT $3"
+
+const deleteEventSQL = "" +
+	"DELETE FROM syncapi_output_room_events WHERE event_id = $1"
+
 const purgeEventsSQL = "" +
 	"DELETE FROM syncapi_output_room_events WHERE room_id = $1"
 
@@ -198,6 +205,8 @@ type outputRoomEventsStatements struct {
 	selectContextBeforeEventStmt   *sql.Stmt
 	selectContextAfterEventStmt    *sql.Stmt
 	purgeEventsStmt                *sql.Stmt
+	selectRetentionCandidatesStmt  *sql.Stmt
+	deleteEventStmt                *sql.Stmt
 	selectSearchStmt               *sql.Stmt
 	selectRoomActivityStmt         *sql.Stmt
 }
@@ -233,6 +242,10 @@ func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
 			Version: migrationName,
 			Up:      deltas.UpRenameOutputRoomEventsIndex,
 		},
+		sqlutil.Migration{
+			Version: "syncapi: event timestamp and state flag (output_room_events)",
+			Up:      deltas.UpEventTimestamp,
+		},
 	)
 	err = m.Up(context.Background())
 	if err != nil {
@@ -254,6 +267,8 @@ func NewPostgresEventsTable(db *sql.DB) (tables.Events, error) {
 		{&s.selectContextBeforeEventStmt, selectContextBeforeEventSQL},
 		{&s.selectContextAfterEventStmt, selectContextAfterEventSQL},
 		{&s.purgeEventsStmt, purgeEventsSQL},
+		{&s.selectRetentionCandidatesStmt, selectRetentionCandidatesSQL},
+		{&s.deleteEventStmt, deleteEventSQL},
 		{&s.selectSearchStmt, selectSearchSQL},
 		{&s.selectRoomActivityStmt, selectRoomActivitySQL},
 	}.Prepare(db)
@@ -409,6 +424,8 @@ func (s *outputRoomEventsStatements) InsertEvent(
 		txnID,
 		excludeFromSync,
 		historyVisibility,
+		int64(event.OriginServerTS()),
+		event.StateKey() != nil,
 	).Scan(&streamPos)
 	return
 }
@@ -762,4 +779,26 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 		}
 	}
 	return result, rows.Err()
+}
+
+func (s *outputRoomEventsStatements) SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectRetentionCandidatesStmt).QueryContext(ctx, roomID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectRetentionCandidates: rows.close() failed")
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *outputRoomEventsStatements) DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error {
+	_, err := sqlutil.TxStmt(txn, s.deleteEventStmt).ExecContext(ctx, eventID)
+	return err
 }

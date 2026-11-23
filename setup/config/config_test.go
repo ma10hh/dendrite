@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/matrix-org/gomatrixserverlib/fclient"
 	"github.com/matrix-org/gomatrixserverlib/spec"
@@ -414,5 +415,29 @@ func TestHelmValuesLoadStrictly(t *testing.T) {
 	var c Dendrite
 	if err := unmarshalConfig(conf, &c, true); err != nil {
 		t.Errorf("dendrite_config of helm/dendrite/values.yaml does not load strictly: %v", err)
+	}
+}
+
+func TestMessageRetentionVerify(t *testing.T) {
+	day := 24 * time.Hour
+	for _, tc := range []struct {
+		name    string
+		r       MessageRetention
+		wantErr bool
+	}{
+		{"off ignores the rest", MessageRetention{AllowedLifetimeMin: 2 * day, AllowedLifetimeMax: day}, false},
+		{"on with an interval", MessageRetention{Enabled: true, Interval: time.Hour}, false},
+		{"on without an interval", MessageRetention{Enabled: true}, true},
+		{"negative lifetime", MessageRetention{DefaultPolicy: RetentionPolicy{MaxLifetime: -day}}, true},
+		{"allowed range upside down", MessageRetention{Enabled: true, Interval: time.Hour, AllowedLifetimeMin: 2 * day, AllowedLifetimeMax: day}, true},
+		{"default min above max", MessageRetention{Enabled: true, Interval: time.Hour, DefaultPolicy: RetentionPolicy{MinLifetime: 2 * day, MaxLifetime: day}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var errs ConfigErrors
+			tc.r.Verify(&errs)
+			if (len(errs) > 0) != tc.wantErr {
+				t.Errorf("errors = %v, want error: %v", errs, tc.wantErr)
+			}
+		})
 	}
 }

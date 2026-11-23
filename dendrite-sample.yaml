@@ -385,6 +385,22 @@ sync_api:
     # can be found at https://github.com/blevesearch/bleve/tree/master/analysis/lang
     language: "en"
 
+  # Deletes messages that are older than the retention policy of their room (the m.room.retention
+  # state event, or default_policy for rooms without one). State events are never deleted. Off by
+  # default: deleted messages cannot be restored, other than from a backup. See
+  # docs/administration/13_message_retention.md. Durations are in hours, e.g. 720h for 30 days.
+  retention:
+    enabled: false
+    # Applies to rooms that have no m.room.retention event. 0 means no limit.
+    default_policy:
+      min_lifetime: 0s
+      max_lifetime: 0s
+    # Limits for the policies of rooms: shorter lifetimes are raised, longer ones lowered. 0 allows any.
+    allowed_lifetime_min: 0s
+    allowed_lifetime_max: 0s
+    # The time between two runs of the deletion.
+    interval: 1h
+
 # Configuration for the User API.
 user_api:
   # The cost when hashing passwords on registration/login. Default: 10. Min: 4, Max: 31

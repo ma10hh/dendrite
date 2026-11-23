@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -1349,5 +1350,77 @@ func TestEmptyRooms(t *testing.T) {
 		emptyRooms, err := rsAPI.EmptyRooms(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, []string{r2.ID}, emptyRooms)
+	})
+}
+
+func TestPruneEvents(t *testing.T) {
+	alice := test.NewUser(t)
+	room := test.NewRoom(t, alice)
+	message := room.CreateAndInsert(t, alice, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "secret"})
+	topic := room.CreateAndInsert(t, alice, "m.room.topic", map[string]interface{}{"topic": "kept"}, test.WithStateKey(""))
+	later := room.CreateAndInsert(t, alice, "m.room.message", map[string]interface{}{"msgtype": "m.text", "body": "newer"})
+
+	ctx := context.Background()
+	test.WithAllDatabases(t, func(t *testing.T, dbType test.DBType) {
+		cfg, processCtx, close := testrig.CreateConfig(t, dbType)
+		natsInstance := jetstream.NATSInstance{}
+		defer close()
+		cm := sqlutil.NewConnectionManager(processCtx, cfg.Global.DatabaseOptions)
+		caches := caching.NewRistrettoCache(128*1024*1024, time.Hour, caching.DisableMetrics)
+		db, err := storage.Open(processCtx.Context(), cm, &cfg.RoomServer.Database, caches)
+		if err != nil {
+			t.Fatal(err)
+		}
+		jsCtx, _ := natsInstance.Prepare(processCtx, &cfg.Global.JetStream)
+		defer jetstream.DeleteAllStreams(jsCtx, &cfg.Global.JetStream)
+		rsAPI := roomserver.NewInternalAPI(processCtx, cfg, cm, &natsInstance, caches, caching.DisableMetrics)
+		fsAPI := federationapi.NewInternalAPI(processCtx, cfg, cm, &natsInstance, nil, rsAPI, caches, nil, true)
+		rsAPI.SetFederationAPI(fsAPI, nil)
+
+		if err = api.SendEvents(ctx, rsAPI, api.KindNew, room.Events(), "test", "test", "test", nil, false); err != nil {
+			t.Fatalf("failed to send events: %v", err)
+		}
+
+		n, err := rsAPI.PerformAdminPruneEvents(ctx, room.ID, []string{message.EventID(), topic.EventID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1 {
+			t.Errorf("pruned %d events, want 1: a state event is never pruned", n)
+		}
+
+		roomInfo, err := db.RoomInfo(ctx, room.ID)
+		if err != nil || roomInfo == nil {
+			t.Fatalf("RoomInfo: %v %v", roomInfo, err)
+		}
+		events, err := db.EventsFromIDs(ctx, roomInfo, []string{message.EventID(), topic.EventID(), later.EventID()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ev := range events {
+			switch ev.EventID() {
+			case message.EventID():
+				if string(ev.Content()) != "{}" {
+					t.Errorf("the pruned message still has content: %s", ev.Content())
+				}
+				if ev.SenderID() != spec.SenderID(alice.ID) {
+					t.Errorf("the sender is part of what stays, got %q", ev.SenderID())
+				}
+			case topic.EventID():
+				if !strings.Contains(string(ev.Content()), "kept") {
+					t.Errorf("the state event lost its content: %s", ev.Content())
+				}
+			case later.EventID():
+				if !strings.Contains(string(ev.Content()), "newer") {
+					t.Errorf("an event that was not asked for lost its content: %s", ev.Content())
+				}
+			}
+		}
+
+		// Pruning again changes nothing, and an unknown event is ignored.
+		n, err = rsAPI.PerformAdminPruneEvents(ctx, room.ID, []string{message.EventID(), "$unknown"})
+		if err != nil || n != 0 {
+			t.Errorf("second prune: n=%d err=%v, want 0 and no error", n, err)
+		}
 	})
 }

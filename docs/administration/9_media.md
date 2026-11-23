@@ -34,7 +34,7 @@ media_api:
 - Media downloaded before this feature existed counts as unused since its upload, so the first run after turning it on can delete a lot.
 - The run is logged at info level when it deleted something ("Removed unused media").
 
-Retention of messages (`m.room.retention`, MSC1763) is not supported.
+Retention of messages is a separate feature, see [message retention](13_message_retention.md).
 
 ## Admin API
 

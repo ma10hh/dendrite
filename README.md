@@ -47,13 +47,14 @@ Element X and an administrator of a small server need. Everything new that chang
 | URL previews, with protection against requests to private networks | No | Yes | Off (`media_api.url_previews`) |
 | Admin API | `/_dendrite/admin` | Also the Synapse admin API at `/_synapse/admin` (users, rooms, block list, media quarantine and deletion, registration tokens) | On, admins only |
 | Media: quota per user, deletion of media nobody downloaded | No | Yes | Off (`media_api.max_user_storage_bytes`, `media_api.retention`) |
+| Message retention policies (`m.room.retention`, MSC1763): old messages are deleted | No | Yes | Off (`sync_api.retention.enabled`) |
 | Metrics | A few | Also the duration of every request, the database pools and the new features | With `global.metrics.enabled` |
 | Joining big rooms without their member list (MSC3706) | No | Experimental, **do not enable** | Off (`federation_api.partial_state_joins`) |
 | Configuration check | Unknown and repeated keys are ignored | **Refused at startup**, with their line numbers | On |
 | Remote crash through an event whose room ID is `!:` (found by fuzzing) | Same code paths, not tested | Fixed | Fixed |
 | Docker image | `ghcr.io/element-hq/dendrite-monolith` | `ghcr.io/ma10hh/dendrite-monolith:<tag>`, `linux/amd64`, no `latest` | |
 
-Not available in either: workers, high availability, message retention policies, and Element Call (delayed events, MatrixRTC).
+Not available in either: workers, high availability, and Element Call (delayed events, MatrixRTC).
 
 The whole list with the reasons is in [`CHANGES.md`](CHANGES.md), the decisions behind it in
 [`docs/development/decisions.md`](docs/development/decisions.md), and what the tests say in [the supported features](#supported-features).
@@ -65,7 +66,8 @@ signing key and configuration stay as they are: the fork reads the same database
 
 **What changes in the databases.** On the first start, the migrations add: three tables (`roomserver_partial_state_rooms`,
 `roomserver_partial_state_events`, `roomserver_blocked_rooms`), two columns of the media table (`quarantined`, `last_access_ts`, both with a default)
-and two indexes on it (`user_id`, `base64hash`: a moment on a table with millions of rows). Nothing is renamed or removed. Sliding sync sessions are
+and two indexes on it (`user_id`, `base64hash`: a moment on a table with millions of rows). The sync API events table gets two columns (`origin_server_ts`, `is_state`) and an index,
+and the migration reads every stored event once to fill them, which takes a while on a database with millions of events. Nothing is renamed or removed. Sliding sync sessions are
 kept in memory, not in the database.
 
 1. **Start from 0.15.2.** If you are on an older upstream version, update to 0.15.2 first, as its upgrade notes describe, and check that it runs.
@@ -170,7 +172,8 @@ What this fork does, by area. "Tested" means automated tests on SQLite and Postg
 | Synapse admin API (users, rooms, block list, media quarantine and deletion, registration tokens) | Supported, tested | What differs from Synapse is in `docs/administration/8_synapse_adminapi.md`. synapse-admin and Draupnir were not run against it |
 | Media: quota per user, deletion of unused media | Supported, tested | Off by default, `docs/administration/9_media.md` |
 | Metrics (Prometheus), backup and upgrade guides, moving from Synapse | Documented | `docs/administration/10_metrics.md` to `12_from_synapse.md`. There is no Synapse importer |
-| Message retention policies, worker mode, high availability | Not supported | One process; scale it up |
+| Message retention policies (`m.room.retention`) | Supported, tested | Off by default, `docs/administration/13_message_retention.md`. A migration adds two columns to the sync API events table |
+| Worker mode, high availability | Not supported | One process; scale it up |
 | Element Call, delayed events (MSC4140), MatrixRTC (MSC4143) | Not supported | Out of scope for this fork |
 
 ## Requirements

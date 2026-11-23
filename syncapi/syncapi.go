@@ -25,6 +25,7 @@ import (
 	"github.com/element-hq/dendrite/syncapi/consumers"
 	"github.com/element-hq/dendrite/syncapi/notifier"
 	"github.com/element-hq/dendrite/syncapi/producers"
+	"github.com/element-hq/dendrite/syncapi/retention"
 	"github.com/element-hq/dendrite/syncapi/routing"
 	"github.com/element-hq/dendrite/syncapi/slidingsync"
 	"github.com/element-hq/dendrite/syncapi/storage"
@@ -143,6 +144,8 @@ func AddPublicRoutes(
 	if err = receiptConsumer.Start(); err != nil {
 		logrus.WithError(err).Panicf("failed to start receipts consumer")
 	}
+
+	retention.Start(processContext.Context(), &dendriteCfg.SyncAPI.Retention, syncDB, rsAPI, fts)
 
 	rateLimits := httputil.NewRateLimits(&dendriteCfg.ClientAPI.RateLimiting)
 

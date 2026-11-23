@@ -171,6 +171,9 @@ type Database interface {
 	GetHistoryVisibilityState(ctx context.Context, roomInfo *types.RoomInfo, eventID string, domain string) ([]gomatrixserverlib.PDU, error)
 	GetLeftUsers(ctx context.Context, userIDs []string) ([]string, error)
 	PurgeRoom(ctx context.Context, roomID string) error
+	// PruneEvents strips the content of the given events of the room that are not state events, as a redaction does, and
+	// returns how many it changed. The events stay, so that the graph of the room does not break.
+	PruneEvents(ctx context.Context, roomInfo *types.RoomInfo, roomID string, eventIDs []string) (int, error)
 	UpgradeRoom(ctx context.Context, oldRoomID, newRoomID, eventSender string) error
 
 	// GetMembershipForHistoryVisibility queries the membership events for the given eventIDs.

@@ -169,6 +169,8 @@ type QueryMembershipAPI interface {
 
 // API functions required by the syncapi
 type SyncRoomserverAPI interface {
+	// PerformAdminPruneEvents strips the content of the events of the room that are not state events and returns how many it changed.
+	PerformAdminPruneEvents(ctx context.Context, roomID string, eventIDs []string) (int, error)
 	QueryLatestEventsAndStateAPI
 	QueryBulkStateContentAPI
 	QuerySenderIDAPI
@@ -250,6 +252,8 @@ type ClientRoomserverAPI interface {
 	PerformAdminEvacuateRoom(ctx context.Context, roomID string) (affected []string, err error)
 	PerformAdminEvacuateUser(ctx context.Context, userID string) (affected []string, err error)
 	PerformAdminPurgeRoom(ctx context.Context, roomID string) error
+	// PerformAdminPruneEvents strips the content of the events of the room that are not state events and returns how many it changed.
+	PerformAdminPruneEvents(ctx context.Context, roomID string, eventIDs []string) (int, error)
 	PerformAdminDownloadState(ctx context.Context, roomID, userID string, serverName spec.ServerName) error
 	AdminQueryEmptyRooms(ctx context.Context) ([]string, error)
 	AdminQueryAllRooms(ctx context.Context) ([]string, error)

@@ -24,7 +24,7 @@ There is **no tool that imports a Synapse database** into Dendrite. The two serv
 ## What is different
 
 - No workers: Dendrite is one process. Scale it up, not out.
-- No media or message retention policies by room (`m.room.retention`): only the media retention of [media storage](9_media.md).
+- Message retention policies (`m.room.retention`) are supported, with fewer options, see [message retention](13_message_retention.md). Media is deleted by its own [retention](9_media.md), not by room.
 - No SSO, SAML, CAS or JWT login by itself: use MAS for those.
 - Account validity, shadow bans, rate limit overrides per user and the rest of the Synapse admin API that is not listed in [the Synapse admin API](8_synapse_adminapi.md) do not exist.
 - The configuration is a different file with different options: see `dendrite-sample.yaml`.

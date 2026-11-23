@@ -377,3 +377,16 @@ func (r *Admin) QueryRoomBlocked(ctx context.Context, roomID string) (bool, erro
 func errRoomBlocked() error {
 	return api.ErrNotAllowed{Err: fmt.Errorf("This room has been blocked on this server")}
 }
+
+// PerformAdminPruneEvents strips the content of events of a room that are not state events, which is how old messages
+// are deleted from the roomserver. It returns how many events it changed.
+func (r *Admin) PerformAdminPruneEvents(ctx context.Context, roomID string, eventIDs []string) (int, error) {
+	roomInfo, err := r.DB.RoomInfo(ctx, roomID)
+	if err != nil {
+		return 0, err
+	}
+	if roomInfo == nil || roomInfo.IsStub() {
+		return 0, eventutil.ErrRoomNoExists{}
+	}
+	return r.DB.PruneEvents(ctx, roomInfo, roomID, eventIDs)
+}

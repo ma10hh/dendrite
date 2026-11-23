@@ -69,6 +69,11 @@ type Events interface {
 	UpdateEventJSON(ctx context.Context, txn *sql.Tx, event *rstypes.HeaderedEvent) error
 	// DeleteEventsForRoom removes all event information for a room. This should only be done when removing the room entirely.
 	DeleteEventsForRoom(ctx context.Context, txn *sql.Tx, roomID string) (err error)
+	// SelectRetentionCandidates returns up to limit non-state events of the room that were sent before the time (milliseconds), oldest first.
+	// Events without a known time are never returned.
+	SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error)
+	// DeleteEvent removes one event.
+	DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error
 
 	SelectContextEvent(ctx context.Context, txn *sql.Tx, roomID, eventID string) (int, rstypes.HeaderedEvent, error)
 	SelectContextBeforeEvent(ctx context.Context, txn *sql.Tx, id int, roomID string, filter *synctypes.RoomEventFilter) ([]*rstypes.HeaderedEvent, error)
@@ -94,6 +99,8 @@ type Topology interface {
 	// SelectStreamToTopologicalPosition converts a stream position to a topological position by finding the nearest topological position in the room.
 	SelectStreamToTopologicalPosition(ctx context.Context, txn *sql.Tx, roomID string, streamPos types.StreamPosition, forward bool) (topoPos types.StreamPosition, err error)
 	PurgeEventsTopology(ctx context.Context, txn *sql.Tx, roomID string) error
+	// DeleteEventFromTopology removes one event from the topology.
+	DeleteEventFromTopology(ctx context.Context, txn *sql.Tx, eventID string) error
 }
 
 type CurrentRoomState interface {
@@ -107,6 +114,8 @@ type CurrentRoomState interface {
 	UpsertRoomState(ctx context.Context, txn *sql.Tx, event *rstypes.HeaderedEvent, membership *string, addedAt types.StreamPosition) error
 	DeleteRoomStateByEventID(ctx context.Context, txn *sql.Tx, eventID string) error
 	DeleteRoomStateForRoom(ctx context.Context, txn *sql.Tx, roomID string) error
+	// SelectRoomIDsWithType returns the rooms that have a current state event of the type.
+	SelectRoomIDsWithType(ctx context.Context, txn *sql.Tx, evType string) ([]string, error)
 	// SelectCurrentState returns all the current state events for the given room.
 	SelectCurrentState(ctx context.Context, txn *sql.Tx, roomID string, stateFilter *synctypes.StateFilter, excludeEventIDs []string) ([]*rstypes.HeaderedEvent, error)
 	// SelectRoomIDsWithMembership returns the list of room IDs which have the given user in the given membership state.

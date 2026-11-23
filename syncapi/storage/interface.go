@@ -148,6 +148,12 @@ type Database interface {
 	PurgeRoomState(ctx context.Context, roomID string) error
 	// PurgeRoom entirely eliminates a room from the sync API, timeline, state and all.
 	PurgeRoom(ctx context.Context, roomID string) error
+	// RoomIDsWithStateType returns the rooms that have a current state event of the type.
+	RoomIDsWithStateType(ctx context.Context, evType string) ([]string, error)
+	// RetentionCandidates returns up to limit non-state events of the room that were sent before the time (milliseconds).
+	RetentionCandidates(ctx context.Context, roomID string, before int64, limit int) ([]string, error)
+	// DeleteEvents removes the events from the timeline of the room, for good. State events are not to be passed.
+	DeleteEvents(ctx context.Context, roomID string, eventIDs []string) error
 	// UpsertAccountData keeps track of new or updated account data, by saving the type
 	// of the new/updated data, and the user ID and room ID the data is related to (empty)
 	// room ID means the data isn't specific to any room)

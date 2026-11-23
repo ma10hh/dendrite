@@ -55,9 +55,9 @@ CREATE INDEX IF NOT EXISTS syncapi_output_room_events_remove_state_ids_idx ON sy
 
 const insertEventSQL = "" +
 	"INSERT INTO syncapi_output_room_events (" +
-	"id, room_id, event_id, headered_event_json, type, sender, contains_url, add_state_ids, remove_state_ids, session_id, transaction_id, exclude_from_sync, history_visibility" +
-	") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) " +
-	"ON CONFLICT (event_id) DO UPDATE SET exclude_from_sync = (excluded.exclude_from_sync AND $14)"
+	"id, room_id, event_id, headered_event_json, type, sender, contains_url, add_state_ids, remove_state_ids, session_id, transaction_id, exclude_from_sync, history_visibility, origin_server_ts, is_state" +
+	") VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) " +
+	"ON CONFLICT (event_id) DO UPDATE SET exclude_from_sync = (excluded.exclude_from_sync AND $16)"
 
 const selectEventsSQL = "" +
 	"SELECT event_id, id, headered_event_json, session_id, exclude_from_sync, transaction_id, history_visibility FROM syncapi_output_room_events WHERE event_id IN ($1)"
@@ -110,20 +110,29 @@ const selectContextAfterEventSQL = "" +
 
 const selectSearchSQL = "SELECT id, event_id, headered_event_json FROM syncapi_output_room_events WHERE id > $1 AND type IN ($2)"
 
+const selectRetentionCandidatesSQL = "" +
+	"SELECT event_id FROM syncapi_output_room_events WHERE room_id = $1 AND origin_server_ts > 0 AND origin_server_ts < $2 AND is_state = FALSE" +
+	" ORDER BY origin_server_ts ASC, id ASC LIMIT $3"
+
+const deleteEventSQL = "" +
+	"DELETE FROM syncapi_output_room_events WHERE event_id = $1"
+
 const purgeEventsSQL = "" +
 	"DELETE FROM syncapi_output_room_events WHERE room_id = $1"
 
 type outputRoomEventsStatements struct {
-	db                           *sql.DB
-	streamIDStatements           *StreamIDStatements
-	insertEventStmt              *sql.Stmt
-	selectMaxEventIDStmt         *sql.Stmt
-	updateEventJSONStmt          *sql.Stmt
-	deleteEventsForRoomStmt      *sql.Stmt
-	selectContextEventStmt       *sql.Stmt
-	selectContextBeforeEventStmt *sql.Stmt
-	selectContextAfterEventStmt  *sql.Stmt
-	purgeEventsStmt              *sql.Stmt
+	db                            *sql.DB
+	streamIDStatements            *StreamIDStatements
+	insertEventStmt               *sql.Stmt
+	selectMaxEventIDStmt          *sql.Stmt
+	updateEventJSONStmt           *sql.Stmt
+	deleteEventsForRoomStmt       *sql.Stmt
+	selectContextEventStmt        *sql.Stmt
+	selectContextBeforeEventStmt  *sql.Stmt
+	selectContextAfterEventStmt   *sql.Stmt
+	purgeEventsStmt               *sql.Stmt
+	selectRetentionCandidatesStmt *sql.Stmt
+	deleteEventStmt               *sql.Stmt
 	//selectSearchStmt             *sql.Stmt - prepared at runtime
 }
 
@@ -143,6 +152,10 @@ func NewSqliteEventsTable(db *sql.DB, streamID *StreamIDStatements) (tables.Even
 			Version: "syncapi: add history visibility column (output_room_events)",
 			Up:      deltas.UpAddHistoryVisibilityColumnOutputRoomEvents,
 		},
+		sqlutil.Migration{
+			Version: "syncapi: event timestamp and state flag (output_room_events)",
+			Up:      deltas.UpEventTimestamp,
+		},
 	)
 	err = m.Up(context.Background())
 	if err != nil {
@@ -158,6 +171,8 @@ func NewSqliteEventsTable(db *sql.DB, streamID *StreamIDStatements) (tables.Even
 		{&s.selectContextBeforeEventStmt, selectContextBeforeEventSQL},
 		{&s.selectContextAfterEventStmt, selectContextAfterEventSQL},
 		{&s.purgeEventsStmt, purgeEventsSQL},
+		{&s.selectRetentionCandidatesStmt, selectRetentionCandidatesSQL},
+		{&s.deleteEventStmt, deleteEventSQL},
 		//{&s.selectSearchStmt, selectSearchSQL}, - prepared at runtime
 	}.Prepare(db)
 }
@@ -351,6 +366,8 @@ func (s *outputRoomEventsStatements) InsertEvent(
 		txnID,
 		excludeFromSync,
 		historyVisibility,
+		int64(event.OriginServerTS()),
+		event.StateKey() != nil,
 		excludeFromSync,
 	)
 	return streamPos, err
@@ -746,4 +763,26 @@ func (s *outputRoomEventsStatements) SelectRoomActivity(
 		}
 	}
 	return result, nil
+}
+
+func (s *outputRoomEventsStatements) SelectRetentionCandidates(ctx context.Context, txn *sql.Tx, roomID string, before int64, limit int) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectRetentionCandidatesStmt).QueryContext(ctx, roomID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectRetentionCandidates: rows.close() failed")
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+func (s *outputRoomEventsStatements) DeleteEvent(ctx context.Context, txn *sql.Tx, eventID string) error {
+	_, err := sqlutil.TxStmt(txn, s.deleteEventStmt).ExecContext(ctx, eventID)
+	return err
 }

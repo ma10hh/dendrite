@@ -2365,3 +2365,29 @@ func (d *Database) SetRoomBlocked(ctx context.Context, roomID string, blocked bo
 func (d *Database) IsRoomBlocked(ctx context.Context, roomID string) (bool, error) {
 	return d.BlockedRoomsTable.IsRoomBlocked(ctx, nil, roomID)
 }
+
+// PruneEvents strips the content of events that are not state events, in the way a redaction does, and returns how
+// many it changed. The events themselves stay: the events after them refer to them, and so does the state.
+func (d *Database) PruneEvents(ctx context.Context, roomInfo *types.RoomInfo, roomID string, eventIDs []string) (int, error) {
+	events, err := d.EventsFromIDs(ctx, roomInfo, eventIDs)
+	if err != nil {
+		return 0, err
+	}
+	pruned := 0
+	err = d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		for i := range events {
+			ev := events[i]
+			if ev.StateKey() != nil || ev.RoomID().String() != roomID || string(ev.Content()) == "{}" {
+				continue
+			}
+			ev.Redact()
+			if err := d.EventJSONTable.InsertEventJSON(ctx, txn, ev.EventNID, ev.JSON()); err != nil {
+				return fmt.Errorf("d.EventJSONTable.InsertEventJSON: %w", err)
+			}
+			d.Cache.InvalidateRoomServerEvent(ev.EventNID)
+			pruned++
+		}
+		return nil
+	})
+	return pruned, err
+}

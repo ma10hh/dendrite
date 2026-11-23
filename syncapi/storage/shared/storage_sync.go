@@ -856,3 +856,28 @@ func (d *DatabaseTransaction) RelationsFor(ctx context.Context, roomID, eventID,
 
 	return events, prevBatch, nextBatch, nil
 }
+
+func (d *Database) RoomIDsWithStateType(ctx context.Context, evType string) ([]string, error) {
+	return d.CurrentRoomState.SelectRoomIDsWithType(ctx, nil, evType)
+}
+
+func (d *Database) RetentionCandidates(ctx context.Context, roomID string, before int64, limit int) ([]string, error) {
+	return d.OutputEvents.SelectRetentionCandidates(ctx, nil, roomID, before, limit)
+}
+
+func (d *Database) DeleteEvents(ctx context.Context, roomID string, eventIDs []string) error {
+	return d.Writer.Do(d.DB, nil, func(txn *sql.Tx) error {
+		for _, eventID := range eventIDs {
+			if err := d.OutputEvents.DeleteEvent(ctx, txn, eventID); err != nil {
+				return fmt.Errorf("failed to delete event: %w", err)
+			}
+			if err := d.Topology.DeleteEventFromTopology(ctx, txn, eventID); err != nil {
+				return fmt.Errorf("failed to delete event from the topology: %w", err)
+			}
+			if err := d.Relations.DeleteRelation(ctx, txn, roomID, eventID); err != nil {
+				return fmt.Errorf("failed to delete relation: %w", err)
+			}
+		}
+		return nil
+	})
+}

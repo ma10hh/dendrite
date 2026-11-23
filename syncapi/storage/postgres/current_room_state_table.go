@@ -74,6 +74,9 @@ const deleteRoomStateByEventIDSQL = "" +
 const deleteRoomStateForRoomSQL = "" +
 	"DELETE FROM syncapi_current_room_state WHERE room_id = $1"
 
+const selectRoomIDsWithTypeSQL = "" +
+	"SELECT DISTINCT room_id FROM syncapi_current_room_state WHERE type = $1"
+
 const selectRoomIDsWithMembershipSQL = "" +
 	"SELECT DISTINCT room_id FROM syncapi_current_room_state WHERE type = 'm.room.member' AND state_key = $1 AND membership = $2"
 
@@ -119,6 +122,7 @@ type currentRoomStateStatements struct {
 	upsertRoomStateStmt                *sql.Stmt
 	deleteRoomStateByEventIDStmt       *sql.Stmt
 	deleteRoomStateForRoomStmt         *sql.Stmt
+	selectRoomIDsWithTypeStmt          *sql.Stmt
 	selectRoomIDsWithMembershipStmt    *sql.Stmt
 	selectRoomIDsWithAnyMembershipStmt *sql.Stmt
 	selectCurrentStateStmt             *sql.Stmt
@@ -154,6 +158,7 @@ func NewPostgresCurrentRoomStateTable(db *sql.DB) (tables.CurrentRoomState, erro
 		{&s.upsertRoomStateStmt, upsertRoomStateSQL},
 		{&s.deleteRoomStateByEventIDStmt, deleteRoomStateByEventIDSQL},
 		{&s.deleteRoomStateForRoomStmt, deleteRoomStateForRoomSQL},
+		{&s.selectRoomIDsWithTypeStmt, selectRoomIDsWithTypeSQL},
 		{&s.selectRoomIDsWithMembershipStmt, selectRoomIDsWithMembershipSQL},
 		{&s.selectRoomIDsWithAnyMembershipStmt, selectRoomIDsWithAnyMembershipSQL},
 		{&s.selectCurrentStateStmt, selectCurrentStateSQL},
@@ -533,4 +538,21 @@ func (s *currentRoomStateStatements) SelectStateEventsWithKeys(
 		result = append(result, &ev)
 	}
 	return result, rows.Err()
+}
+
+func (s *currentRoomStateStatements) SelectRoomIDsWithType(ctx context.Context, txn *sql.Tx, evType string) ([]string, error) {
+	rows, err := sqlutil.TxStmt(txn, s.selectRoomIDsWithTypeStmt).QueryContext(ctx, evType)
+	if err != nil {
+		return nil, err
+	}
+	defer internal.CloseAndLogIfError(ctx, rows, "SelectRoomIDsWithType: rows.close() failed")
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err = rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

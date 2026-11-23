@@ -17,6 +17,7 @@ import (
 
 	"github.com/element-hq/dendrite/clientapi/httputil"
 	"github.com/element-hq/dendrite/internal/eventutil"
+	retentionpolicy "github.com/element-hq/dendrite/internal/retention"
 	"github.com/element-hq/dendrite/internal/transactions"
 	"github.com/element-hq/dendrite/roomserver/api"
 	"github.com/element-hq/dendrite/roomserver/types"
@@ -154,6 +155,14 @@ func SendEvent(
 		return util.JSONResponse{
 			Code: http.StatusBadRequest,
 			JSON: spec.InvalidParam(err.Error()),
+		}
+	}
+
+	if eventType == retentionpolicy.EventType && stateKey != nil && *stateKey == "" {
+		if raw, merr := json.Marshal(r); merr != nil {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.BadJSON("Cannot read the content.")}
+		} else if verr := retentionpolicy.Validate(raw); verr != nil {
+			return util.JSONResponse{Code: http.StatusBadRequest, JSON: spec.BadJSON(verr.Error())}
 		}
 	}
 
